@@ -9,7 +9,7 @@ import { formatMinutes } from '../utils/time';
 type Period = 'daily' | 'weekly' | 'monthly';
 
 interface ProjectStat {
-  project_id: number;
+  project_key: string;
   project_name: string;
   project_color: string;
   total_minutes: number;
@@ -38,23 +38,24 @@ function getRangeISO(period: Period): { from: string; to: string } {
   return { from: from.toISOString(), to };
 }
 
-function computeStats(period: Period): ProjectStat[] {
+async function computeStats(period: Period): Promise<ProjectStat[]> {
   const { from, to } = getRangeISO(period);
-  const sessions = getSessionsInRange(from, to);
+  const sessions = await getSessionsInRange(from, to);
 
-  const map = new Map<number, ProjectStat>();
+  const map = new Map<string, ProjectStat>();
   for (const s of sessions) {
-    const id = s.project_id;
-    if (!map.has(id)) {
-      map.set(id, {
-        project_id: id,
-        project_name: s.project_name ?? 'Unknown',
+    const rawName = (s.project_name ?? '').trim();
+    const key = rawName ? rawName.toLowerCase() : `project-${s.project_id}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        project_key: key,
+        project_name: rawName || 'Unknown',
         project_color: s.project_color ?? '#ccc',
         total_minutes: 0,
         percentage: 0,
       });
     }
-    map.get(id)!.total_minutes += s.duration_minutes ?? 0;
+    map.get(key)!.total_minutes += s.duration_minutes ?? 0;
   }
 
   const stats = Array.from(map.values()).sort((a, b) => b.total_minutes - a.total_minutes);
@@ -111,7 +112,7 @@ function DonutChart({ stats, totalMinutes }: { stats: ProjectStat[]; totalMinute
             const sweep = (stat.percentage / 100) * 360;
             const path = slicePath(cx, cy, OUTER_R, INNER_R, currentAngle, currentAngle + sweep);
             currentAngle += sweep;
-            return <Path key={stat.project_id} d={path} fill={stat.project_color} />;
+            return <Path key={stat.project_key} d={path} fill={stat.project_color} />;
           })
         )}
         {/* Center label */}
@@ -151,7 +152,7 @@ export default function StatsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setStats(computeStats(period));
+      computeStats(period).then(setStats);
     }, [period])
   );
 
@@ -168,7 +169,7 @@ export default function StatsScreen() {
               style={[styles.tab, period === p.key && styles.tabActive]}
               onPress={() => {
                 setPeriod(p.key);
-                setStats(computeStats(p.key));
+                computeStats(p.key).then(setStats);
               }}
               activeOpacity={0.75}
             >
@@ -190,7 +191,7 @@ export default function StatsScreen() {
         ) : (
           <View style={styles.legend}>
             {stats.map((stat) => (
-              <View key={stat.project_id} style={styles.legendRow}>
+              <View key={stat.project_key} style={styles.legendRow}>
                 <View style={styles.legendLeft}>
                   <View style={[styles.legendDot, { backgroundColor: stat.project_color }]} />
                   <Text style={styles.legendName}>{stat.project_name}</Text>

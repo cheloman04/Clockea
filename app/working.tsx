@@ -18,36 +18,52 @@ export default function WorkingScreen() {
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    const active = getActiveSession();
-    if (!active) {
-      router.replace('/');
-      return;
-    }
-    setSession(active);
+    getActiveSession().then((active) => {
+      if (!active) {
+        router.replace('/');
+        return;
+      }
+      setSession(active);
+    });
   }, []);
 
-  function refreshSession() {
-    const active = getActiveSession();
+  async function refreshSession() {
+    const active = await getActiveSession();
     if (active) setSession(active);
   }
 
-  function handleBreak() {
+  async function handleBreak() {
     if (!session) return;
-    startBreak(session.id);
-    refreshSession();
+    try {
+      await startBreak(session.id);
+      refreshSession();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not start break.';
+      Alert.alert('Error', message);
+    }
   }
 
-  function handleResume() {
+  async function handleResume() {
     if (!session) return;
-    endBreak(session.id);
-    refreshSession();
+    try {
+      await endBreak(session.id);
+      refreshSession();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not resume session.';
+      Alert.alert('Error', message);
+    }
   }
 
   function handleClockOut() {
-    const doClockOut = () => {
+    const doClockOut = async () => {
       if (session) {
-        clockOut(session.id);
-        router.replace({ pathname: '/session-recap', params: { sessionId: String(session.id) } });
+        try {
+          await clockOut(session.id);
+          router.replace({ pathname: '/session-recap', params: { sessionId: String(session.id) } });
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Could not clock out.';
+          Alert.alert('Error', message);
+        }
       }
     };
 

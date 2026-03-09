@@ -34,9 +34,14 @@ export default function ClockInScreen() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedColor, setSelectedColor] = useState(PALETTE[0]);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    setProjects(getProjects());
+    getProjects()
+      .then(setProjects)
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : 'Could not load projects.');
+      });
   }, []);
 
   function openAdd() {
@@ -59,30 +64,40 @@ export default function ClockInScreen() {
     setEditingProject(null);
   }
 
-  function handleSelectProject(project: Project) {
-    clockIn(project.id);
+  async function handleSelectProject(project: Project) {
+    await clockIn(project.id);
     router.replace('/working');
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!name.trim()) {
       if (Platform.OS === 'web') window.alert('Please enter a project name.');
       return;
     }
-    createProject(name.trim(), selectedColor);
-    setProjects(getProjects());
-    closeForm();
+    try {
+      setError('');
+      await createProject(name.trim(), selectedColor);
+      setProjects(await getProjects());
+      closeForm();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save project.');
+    }
   }
 
-  function handleUpdate() {
+  async function handleUpdate() {
     if (!editingProject) return;
     if (!name.trim()) {
       if (Platform.OS === 'web') window.alert('Please enter a project name.');
       return;
     }
-    updateProject(editingProject.id, name.trim(), selectedColor, description.trim());
-    setProjects(getProjects());
-    closeForm();
+    try {
+      setError('');
+      await updateProject(editingProject.id, name.trim(), selectedColor, description.trim());
+      setProjects(await getProjects());
+      closeForm();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update project.');
+    }
   }
 
   const isEditing = mode === 'edit';
@@ -116,6 +131,8 @@ export default function ClockInScreen() {
           <Text style={styles.formHeading}>
             {isEditing ? 'Edit Project' : 'New Project'}
           </Text>
+
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Text style={styles.formLabel}>Project Name</Text>
           <TextInput
@@ -212,6 +229,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#ffffff',
     marginBottom: 28,
+  },
+  error: {
+    backgroundColor: '#EF444420',
+    color: '#EF4444',
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#EF444440',
   },
   formLabel: {
     fontSize: 11,

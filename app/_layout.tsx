@@ -1,11 +1,26 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
-import { initDb } from '../database/storage';
+import { View } from 'react-native';
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
-export default function RootLayout() {
+function RootLayoutNav() {
+  const { user, loading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
   useEffect(() => {
-    initDb();
-  }, []);
+    if (loading) return;
+    const onAuthScreen = segments[0] === 'login' || segments[0] === 'register';
+    if (!user && !onAuthScreen) {
+      router.replace('/login');
+    } else if (user && onAuthScreen) {
+      router.replace('/');
+    }
+  }, [user, loading]);
+
+  if (loading) {
+    return <View style={{ flex: 1, backgroundColor: '#1e3545' }} />;
+  }
 
   return (
     <Stack
@@ -16,12 +31,24 @@ export default function RootLayout() {
         headerTintColor: '#fe7f2d',
       }}
     >
-      <Stack.Screen name="index" options={{ title: 'Clockea' }} />
+      <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="register" options={{ headerShown: false }} />
+      <Stack.Screen name="index" options={{ title: '' }} />
       <Stack.Screen name="clock-in" options={{ title: 'Clock In' }} />
       <Stack.Screen name="working" options={{ headerShown: false }} />
       <Stack.Screen name="session-recap" options={{ headerShown: false }} />
       <Stack.Screen name="history" options={{ title: 'History' }} />
       <Stack.Screen name="stats" options={{ title: 'Analytics' }} />
+      <Stack.Screen name="create-team" options={{ title: 'Create Team' }} />
+      <Stack.Screen name="profile" options={{ title: 'Profile' }} />
     </Stack>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <RootLayoutNav />
+    </AuthProvider>
   );
 }

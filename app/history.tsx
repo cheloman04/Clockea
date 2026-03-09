@@ -32,7 +32,7 @@ export default function HistoryScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setSections(groupByDay(getAllSessions()));
+      getAllSessions().then((sessions) => setSections(groupByDay(sessions)));
     }, [])
   );
 

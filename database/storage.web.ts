@@ -1,185 +1,191 @@
+import { supabase } from '../lib/supabase';
 import { Project, Session } from './types';
 
-const KEYS = {
-  projects: 'tt_projects',
-  sessions: 'tt_sessions',
-  nextId: 'tt_next_id',
-};
-
-const DEFAULT_PROJECTS: Project[] = [
-  { id: 1, name: 'Personal', color: '#4CAF50' },
-  { id: 2, name: 'Work', color: '#2196F3' },
-  { id: 3, name: 'Learning', color: '#FF9800' },
-];
-
-function load<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+function ensureNoError(error: { message: string } | null) {
+  if (error) throw new Error(error.message);
 }
 
-function save(key: string, value: unknown): void {
-  localStorage.setItem(key, JSON.stringify(value));
+export async function initDb(): Promise<void> {
+  // Supabase manages the schema; nothing to initialize client-side
 }
 
-function nextId(): number {
-  const current = parseInt(localStorage.getItem(KEYS.nextId) ?? '0', 10);
-  const next = current + 1;
-  localStorage.setItem(KEYS.nextId, String(next));
-  return next;
+export async function getProjects(): Promise<Project[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .order('name');
+  ensureNoError(error);
+  if (!data) return [];
+  return data as Project[];
 }
 
-function loadProjects(): Project[] {
-  return load<Project[]>(KEYS.projects, []);
+export async function getActiveSession(): Promise<Session | null> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*, projects!project_id(name, color)')
+    .is('end_time', null)
+    .maybeSingle();
+  if (error || !data) return null;
+  const p = data.projects as { name: string; color: string } | null;
+  return { ...data, project_name: p?.name, project_color: p?.color } as Session;
 }
 
-function loadSessions(): Session[] {
-  return load<Session[]>(KEYS.sessions, []);
+export async function clockIn(projectId: number): Promise<number> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from('sessions')
+    .insert({
+      project_id: projectId,
+      user_id: user!.id,
+      start_time: new Date().toISOString(),
+      total_break_seconds: 0,
+    })
+    .select('id')
+    .single();
+  ensureNoError(error);
+  if (!data) throw new Error('Could not start session.');
+  return data.id;
 }
 
-export function initDb(): void {
-  if (loadProjects().length === 0) {
-    save(KEYS.projects, DEFAULT_PROJECTS);
-    localStorage.setItem(KEYS.nextId, '3');
-  }
-}
-
-export function getProjects(): Project[] {
-  return loadProjects().sort((a, b) => a.name.localeCompare(b.name));
-}
-
-export function getActiveSession(): Session | null {
-  const projects = loadProjects();
-  const active = loadSessions().find((s) => s.end_time == null) ?? null;
-  if (!active) return null;
-  const project = projects.find((p) => p.id === active.project_id);
-  return { ...active, project_name: project?.name, project_color: project?.color };
-}
-
-export function clockIn(projectId: number): number {
-  const id = nextId();
-  const sessions = loadSessions();
-  sessions.push({
-    id,
-    project_id: projectId,
-    start_time: new Date().toISOString(),
-    end_time: null,
-    duration_minutes: null,
-    break_start: null,
-    total_break_seconds: 0,
-  });
-  save(KEYS.sessions, sessions);
-  return id;
-}
-
-export function clockOut(sessionId: number): void {
-  const sessions = loadSessions();
-  const idx = sessions.findIndex((s) => s.id === sessionId);
-  if (idx === -1) return;
+export async function clockOut(sessionId: number): Promise<void> {
+  const { data: session, error: sessionError } = await supabase
+    .from('sessions')
+    .select('start_time, break_start, total_break_seconds')
+    .eq('id', sessionId)
+    .single();
+  ensureNoError(sessionError);
+  if (!session) return;
 
   const endTime = new Date().toISOString();
-  const session = sessions[idx];
-
-  // If clocking out while on a break, count that break time too
   let totalBreakSeconds = session.total_break_seconds ?? 0;
   if (session.break_start) {
     totalBreakSeconds += Math.floor(
       (new Date(endTime).getTime() - new Date(session.break_start).getTime()) / 1000
     );
   }
-
   const totalSeconds =
     (new Date(endTime).getTime() - new Date(session.start_time).getTime()) / 1000;
   const durationMinutes = (totalSeconds - totalBreakSeconds) / 60;
 
-  sessions[idx] = { ...session, end_time: endTime, duration_minutes: durationMinutes, break_start: null };
-  save(KEYS.sessions, sessions);
+  const { error } = await supabase
+    .from('sessions')
+    .update({
+      end_time: endTime,
+      duration_minutes: durationMinutes,
+      break_start: null,
+      total_break_seconds: totalBreakSeconds,
+    })
+    .eq('id', sessionId);
+  ensureNoError(error);
 }
 
-export function startBreak(sessionId: number): void {
-  const sessions = loadSessions();
-  const idx = sessions.findIndex((s) => s.id === sessionId);
-  if (idx === -1) return;
-  sessions[idx] = { ...sessions[idx], break_start: new Date().toISOString() };
-  save(KEYS.sessions, sessions);
+export async function startBreak(sessionId: number): Promise<void> {
+  const { error } = await supabase
+    .from('sessions')
+    .update({ break_start: new Date().toISOString() })
+    .eq('id', sessionId);
+  ensureNoError(error);
 }
 
-export function endBreak(sessionId: number): void {
-  const sessions = loadSessions();
-  const idx = sessions.findIndex((s) => s.id === sessionId);
-  if (idx === -1 || !sessions[idx].break_start) return;
-  const breakSeconds = Math.floor(
-    (Date.now() - new Date(sessions[idx].break_start!).getTime()) / 1000
-  );
-  sessions[idx] = {
-    ...sessions[idx],
-    break_start: null,
-    total_break_seconds: (sessions[idx].total_break_seconds ?? 0) + breakSeconds,
-  };
-  save(KEYS.sessions, sessions);
+export async function endBreak(sessionId: number): Promise<void> {
+  const { data: session, error: sessionError } = await supabase
+    .from('sessions')
+    .select('break_start, total_break_seconds')
+    .eq('id', sessionId)
+    .single();
+  ensureNoError(sessionError);
+  if (!session?.break_start) return;
+
+  const breakSeconds = Math.floor((Date.now() - new Date(session.break_start).getTime()) / 1000);
+  const { error } = await supabase
+    .from('sessions')
+    .update({
+      break_start: null,
+      total_break_seconds: (session.total_break_seconds ?? 0) + breakSeconds,
+    })
+    .eq('id', sessionId);
+  ensureNoError(error);
 }
 
-export function getTodaySessions(): Session[] {
+export async function getTodaySessions(): Promise<Session[]> {
   const today = new Date().toISOString().split('T')[0];
-  const projects = loadProjects();
-  return loadSessions()
-    .filter((s) => s.start_time.startsWith(today) && s.end_time != null)
-    .sort((a, b) => b.start_time.localeCompare(a.start_time))
-    .map((s) => {
-      const project = projects.find((p) => p.id === s.project_id);
-      return { ...s, project_name: project?.name, project_color: project?.color };
-    });
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*, projects!project_id(name, color)')
+    .gte('start_time', `${today}T00:00:00`)
+    .not('end_time', 'is', null)
+    .order('start_time', { ascending: false });
+  if (error || !data) return [];
+  return data.map((s: any) => ({
+    ...s,
+    project_name: s.projects?.name,
+    project_color: s.projects?.color,
+  })) as Session[];
 }
 
-export function getAllSessions(): Session[] {
-  const projects = loadProjects();
-  return loadSessions()
-    .filter((s) => s.end_time != null)
-    .sort((a, b) => b.start_time.localeCompare(a.start_time))
-    .map((s) => {
-      const project = projects.find((p) => p.id === s.project_id);
-      return { ...s, project_name: project?.name, project_color: project?.color };
-    });
+export async function getAllSessions(): Promise<Session[]> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*, projects!project_id(name, color)')
+    .not('end_time', 'is', null)
+    .order('start_time', { ascending: false });
+  if (error || !data) return [];
+  return data.map((s: any) => ({
+    ...s,
+    project_name: s.projects?.name,
+    project_color: s.projects?.color,
+  })) as Session[];
 }
 
-export function getTodayTotalMinutes(): number {
+export async function getTodayTotalMinutes(): Promise<number> {
   const today = new Date().toISOString().split('T')[0];
-  return loadSessions()
-    .filter((s) => s.start_time.startsWith(today) && s.end_time != null)
-    .reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0);
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('duration_minutes')
+    .gte('start_time', `${today}T00:00:00`)
+    .not('end_time', 'is', null);
+  if (error || !data) return 0;
+  return data.reduce((sum: number, s: any) => sum + (s.duration_minutes ?? 0), 0);
 }
 
-export function createProject(name: string, color: string): void {
-  const projects = loadProjects();
-  projects.push({ id: nextId(), name, color });
-  save(KEYS.projects, projects);
+export async function createProject(name: string, color: string): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from('projects')
+    .insert({ name, color, description: '', user_id: user!.id });
+  ensureNoError(error);
 }
 
-export function updateProject(id: number, name: string, color: string, description: string): void {
-  const projects = loadProjects();
-  const idx = projects.findIndex((p) => p.id === id);
-  if (idx === -1) return;
-  projects[idx] = { ...projects[idx], name, color, description };
-  save(KEYS.projects, projects);
+export async function updateProject(
+  id: number,
+  name: string,
+  color: string,
+  description: string
+): Promise<void> {
+  const { error } = await supabase.from('projects').update({ name, color, description }).eq('id', id);
+  ensureNoError(error);
 }
 
-export function getSessionsInRange(from: string, to: string): Session[] {
-  const projects = loadProjects();
-  return loadSessions()
-    .filter((s) => s.end_time != null && s.start_time >= from && s.start_time <= to)
-    .map((s) => {
-      const project = projects.find((p) => p.id === s.project_id);
-      return { ...s, project_name: project?.name, project_color: project?.color };
-    });
+export async function getSessionsInRange(from: string, to: string): Promise<Session[]> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*, projects!project_id(name, color)')
+    .gte('start_time', from)
+    .lte('start_time', to)
+    .not('end_time', 'is', null);
+  if (error || !data) return [];
+  return data.map((s: any) => ({
+    ...s,
+    project_name: s.projects?.name,
+    project_color: s.projects?.color,
+  })) as Session[];
 }
 
-export function saveSessionNotes(sessionId: number, notes: string): void {
-  const sessions = loadSessions();
-  const idx = sessions.findIndex((s) => s.id === sessionId);
-  if (idx === -1) return;
-  sessions[idx] = { ...sessions[idx], notes };
-  save(KEYS.sessions, sessions);
+export async function saveSessionNotes(sessionId: number, notes: string): Promise<void> {
+  const { error } = await supabase.from('sessions').update({ notes }).eq('id', sessionId);
+  ensureNoError(error);
 }

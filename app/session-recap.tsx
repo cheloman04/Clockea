@@ -16,12 +16,18 @@ export default function SessionRecapScreen() {
   const router = useRouter();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const [notes, setNotes] = useState('');
+  const [error, setError] = useState('');
 
-  function handleSave() {
-    if (sessionId && notes.trim()) {
-      saveSessionNotes(Number(sessionId), notes.trim());
+  async function handleSave() {
+    try {
+      setError('');
+      if (sessionId && notes.trim()) {
+        await saveSessionNotes(Number(sessionId), notes.trim());
+      }
+      router.replace('/');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save session notes.');
     }
-    router.replace('/');
   }
 
   function handleSkip() {
@@ -45,6 +51,7 @@ export default function SessionRecapScreen() {
         </View>
 
         <View style={styles.inputWrapper}>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
           <TextInput
             style={styles.input}
             placeholder="e.g. Finished the login flow, fixed 3 bugs, reviewed designs…"
@@ -126,6 +133,16 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flex: 1,
     marginVertical: 32,
+  },
+  error: {
+    backgroundColor: '#EF444420',
+    color: '#EF4444',
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#EF444440',
   },
   input: {
     flex: 1,
