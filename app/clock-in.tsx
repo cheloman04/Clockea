@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   FlatList,
+  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,7 @@ import ProjectCard from '../components/ProjectCard';
 import {
   clockIn,
   createProject,
+  createSessionObjectives,
   getProjects,
   updateProject,
 } from '../database/storage';
@@ -22,13 +24,18 @@ import { Project } from '../database/types';
 
 const PALETTE = ['#fe7f2d', '#e91e63', '#4caf50', '#00bcd4', '#9c27b0', '#ffb300'];
 
-type Mode = 'list' | 'add' | 'edit';
+type Mode = 'list' | 'add' | 'edit' | 'objective';
 
 export default function ClockInScreen() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [mode, setMode] = useState<Mode>('list');
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+
+  // objective checklist builder
+  const [items, setItems] = useState<string[]>([]);
+  const [inputText, setInputText] = useState('');
 
   // form fields
   const [name, setName] = useState('');
@@ -64,9 +71,47 @@ export default function ClockInScreen() {
     setEditingProject(null);
   }
 
-  async function handleSelectProject(project: Project) {
-    await clockIn(project.id);
-    router.replace('/working');
+  function handleSelectProject(project: Project) {
+    setSelectedProject(project);
+    setItems([]);
+    setInputText('');
+    setMode('objective');
+  }
+
+  function addItem() {
+    const text = inputText.trim();
+    if (!text) return;
+    setItems((prev) => [...prev, text]);
+    setInputText('');
+  }
+
+  function removeItem(index: number) {
+    setItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function handleStart() {
+    if (!selectedProject) return;
+    try {
+      const sessionId = await clockIn(selectedProject.id);
+      if (items.length > 0) {
+        await createSessionObjectives(sessionId, items);
+      }
+      router.replace('/working');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start session.');
+      setMode('list');
+    }
+  }
+
+  async function handleSkipObjectives() {
+    if (!selectedProject) return;
+    try {
+      await clockIn(selectedProject.id);
+      router.replace('/working');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start session.');
+      setMode('list');
+    }
   }
 
   async function handleAdd() {
@@ -103,11 +148,90 @@ export default function ClockInScreen() {
   const isEditing = mode === 'edit';
   const showForm = mode === 'add' || mode === 'edit';
 
+  // ── Objective checklist builder ──────────────────────────────
+  if (mode === 'objective' && selectedProject) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <KeyboardAvoidingView
+          style={styles.objOuter}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.objScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={[styles.projBadge, { backgroundColor: selectedProject.color + '22' }]}>
+              <View style={[styles.projDot, { backgroundColor: selectedProject.color }]} />
+              <Text style={[styles.projBadgeText, { color: selectedProject.color }]}>
+                {selectedProject.name}
+              </Text>
+            </View>
+
+            <Text style={styles.objHeading}>Session Objectives</Text>
+            <Text style={styles.objSub}>What do you plan to accomplish? (optional)</Text>
+
+            {/* Input row */}
+            <View style={styles.objInputRow}>
+              <TextInput
+                style={styles.objInput}
+                placeholder="Add a task…"
+                placeholderTextColor="#4a6d80"
+                value={inputText}
+                onChangeText={setInputText}
+                onSubmitEditing={addItem}
+                returnKeyType="done"
+                blurOnSubmit={true}
+              />
+              <TouchableOpacity
+                style={[styles.addItemBtn, !inputText.trim() && styles.addItemBtnDisabled]}
+                onPress={addItem}
+                activeOpacity={0.75}
+                disabled={!inputText.trim()}
+              >
+                <Text style={styles.addItemBtnText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Added items */}
+            {items.map((item, index) => (
+              <View key={index} style={styles.objItem}>
+                <View style={styles.objBullet} />
+                <Text style={styles.objItemText} numberOfLines={2}>{item}</Text>
+                <TouchableOpacity onPress={() => removeItem(index)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={styles.objRemove}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+          </ScrollView>
+
+          <View style={styles.objActions}>
+            <TouchableOpacity
+              style={styles.startBtn}
+              onPress={handleStart}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.startBtnText}>Start Session</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleSkipObjectives} activeOpacity={0.7}>
+              <Text style={styles.skipText}>Skip objectives</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Project list / add / edit ────────────────────────────────
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       {!showForm ? (
         <>
           <Text style={styles.heading}>Select a Project</Text>
+          {error ? <Text style={[styles.error, { marginHorizontal: 20 }]}>{error}</Text> : null}
           <FlatList
             data={projects}
             keyExtractor={(item) => item.id.toString()}
@@ -220,6 +344,137 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
+
+  // Objective step
+  objOuter: {
+    flex: 1,
+    paddingBottom: 32,
+  },
+  objScrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 32,
+    paddingBottom: 16,
+  },
+  projBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 100,
+    marginBottom: 24,
+  },
+  projDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  projBadgeText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  objHeading: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  objSub: {
+    fontSize: 14,
+    color: '#7aa3b8',
+    marginBottom: 20,
+  },
+  objInputRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  objInput: {
+    flex: 1,
+    backgroundColor: '#233d4d',
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#ffffff',
+  },
+  addItemBtn: {
+    backgroundColor: '#fe7f2d',
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addItemBtnDisabled: {
+    opacity: 0.35,
+  },
+  addItemBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  objItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#233d4d',
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+    gap: 10,
+  },
+  objBullet: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#fe7f2d',
+    flexShrink: 0,
+  },
+  objItemText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#ffffff',
+  },
+  objRemove: {
+    fontSize: 20,
+    color: '#4a6d80',
+    lineHeight: 22,
+    flexShrink: 0,
+  },
+  objActions: {
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+  },
+  startBtn: {
+    backgroundColor: '#fe7f2d',
+    paddingVertical: 18,
+    borderRadius: 14,
+    alignItems: 'center',
+    shadowColor: '#fe7f2d',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  startBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  skipText: {
+    textAlign: 'center',
+    color: '#7aa3b8',
+    fontSize: 15,
+    paddingVertical: 8,
+  },
+
+  // Project form
   formScroll: {
     padding: 20,
     paddingBottom: 48,

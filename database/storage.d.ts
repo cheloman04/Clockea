@@ -1,9 +1,9 @@
-import { Project, Session } from './types';
+import { Project, Session, SessionObjective } from './types';
 
 export function initDb(): Promise<void>;
 export function getProjects(): Promise<Project[]>;
 export function getActiveSession(): Promise<Session | null>;
-export function clockIn(projectId: number): Promise<number>;
+export function clockIn(projectId: number, objective?: string): Promise<number>;
 export function clockOut(sessionId: number): Promise<void>;
 export function getTodaySessions(): Promise<Session[]>;
 export function getAllSessions(): Promise<Session[]>;
@@ -14,3 +14,10 @@ export function getSessionsInRange(from: string, to: string): Promise<Session[]>
 export function startBreak(sessionId: number): Promise<void>;
 export function endBreak(sessionId: number): Promise<void>;
 export function saveSessionNotes(sessionId: number, notes: string): Promise<void>;
+export function saveSessionOutcome(sessionId: number, outcome: 'achieved' | 'partial' | 'missed'): Promise<void>;
+export function deleteSession(sessionId: number): Promise<void>;
+export function getActiveSessions(): Promise<Session[]>;
+export function createSessionObjectives(sessionId: number, texts: string[]): Promise<void>;
+export function toggleObjectiveComplete(objectiveId: string, completed: boolean): Promise<void>;
+export function getSessionObjectives(sessionId: number): Promise<SessionObjective[]>;
+export function getObjectivesForSessions(sessionIds: number[]): Promise<Record<number, SessionObjective[]>>;

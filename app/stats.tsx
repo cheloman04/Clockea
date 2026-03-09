@@ -1,10 +1,12 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { G, Path, Svg, Text as SvgText } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getSessionsInRange } from '../database/storage';
+import { useAuth } from '../contexts/AuthContext';
 import { formatMinutes } from '../utils/time';
+import { Session } from '../database/types';
 
 type Period = 'daily' | 'weekly' | 'monthly';
 
@@ -19,7 +21,6 @@ interface ProjectStat {
 function getRangeISO(period: Period): { from: string; to: string } {
   const now = new Date();
   const to = now.toISOString();
-
   if (period === 'daily') {
     const from = new Date(now);
     from.setHours(0, 0, 0, 0);
@@ -31,17 +32,13 @@ function getRangeISO(period: Period): { from: string; to: string } {
     from.setHours(0, 0, 0, 0);
     return { from: from.toISOString(), to };
   }
-  // monthly
   const from = new Date(now);
   from.setDate(from.getDate() - 29);
   from.setHours(0, 0, 0, 0);
   return { from: from.toISOString(), to };
 }
 
-async function computeStats(period: Period): Promise<ProjectStat[]> {
-  const { from, to } = getRangeISO(period);
-  const sessions = await getSessionsInRange(from, to);
-
+function buildStats(sessions: Session[]): ProjectStat[] {
   const map = new Map<string, ProjectStat>();
   for (const s of sessions) {
     const rawName = (s.project_name ?? '').trim();
@@ -57,7 +54,6 @@ async function computeStats(period: Period): Promise<ProjectStat[]> {
     }
     map.get(key)!.total_minutes += s.duration_minutes ?? 0;
   }
-
   const stats = Array.from(map.values()).sort((a, b) => b.total_minutes - a.total_minutes);
   const total = stats.reduce((sum, s) => sum + s.total_minutes, 0);
   if (total > 0) {
@@ -66,15 +62,12 @@ async function computeStats(period: Period): Promise<ProjectStat[]> {
   return stats;
 }
 
-// --- SVG Donut Chart helpers ---
-
 function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 
 function slicePath(cx: number, cy: number, outerR: number, innerR: number, startAngle: number, endAngle: number): string {
-  // Guard against full-circle edge case
   const safeEnd = endAngle - startAngle >= 360 ? startAngle + 359.99 : endAngle;
   const o1 = polarToCartesian(cx, cy, outerR, startAngle);
   const o2 = polarToCartesian(cx, cy, outerR, safeEnd);
@@ -91,22 +84,18 @@ function slicePath(cx: number, cy: number, outerR: number, innerR: number, start
 }
 
 function DonutChart({ stats, totalMinutes }: { stats: ProjectStat[]; totalMinutes: number }) {
-  const SIZE = 260;
+  const SIZE = 200;
   const cx = SIZE / 2;
   const cy = SIZE / 2;
-  const OUTER_R = 110;
-  const INNER_R = 72;
-
+  const OUTER_R = 84;
+  const INNER_R = 54;
   let currentAngle = 0;
 
   return (
     <Svg width={SIZE} height={SIZE}>
       <G>
         {stats.length === 0 ? (
-          <Path
-            d={slicePath(cx, cy, OUTER_R, INNER_R, 0, 359.99)}
-            fill="#2d4f62"
-          />
+          <Path d={slicePath(cx, cy, OUTER_R, INNER_R, 0, 359.99)} fill="#2d4f62" />
         ) : (
           stats.map((stat) => {
             const sweep = (stat.percentage / 100) * 360;
@@ -115,24 +104,10 @@ function DonutChart({ stats, totalMinutes }: { stats: ProjectStat[]; totalMinute
             return <Path key={stat.project_key} d={path} fill={stat.project_color} />;
           })
         )}
-        {/* Center label */}
-        <SvgText
-          x={cx}
-          y={cy - 10}
-          textAnchor="middle"
-          fill="#ffffff"
-          fontSize="22"
-          fontWeight="300"
-        >
+        <SvgText x={cx} y={cy - 8} textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="300">
           {totalMinutes > 0 ? formatMinutes(totalMinutes) : '—'}
         </SvgText>
-        <SvgText
-          x={cx}
-          y={cy + 14}
-          textAnchor="middle"
-          fill="#7aa3b8"
-          fontSize="11"
-        >
+        <SvgText x={cx} y={cy + 10} textAnchor="middle" fill="#7aa3b8" fontSize="10">
           TOTAL
         </SvgText>
       </G>
@@ -147,64 +122,121 @@ const PERIODS: { key: Period; label: string }[] = [
 ];
 
 export default function StatsScreen() {
+  const router = useRouter();
+  const { user } = useAuth();
   const [period, setPeriod] = useState<Period>('weekly');
-  const [stats, setStats] = useState<ProjectStat[]>([]);
+  const [myStats, setMyStats] = useState<ProjectStat[]>([]);
+  const [teamStats, setTeamStats] = useState<ProjectStat[]>([]);
+
+  const loadStats = useCallback(async (p: Period) => {
+    const { from, to } = getRangeISO(p);
+    const sessions = await getSessionsInRange(from, to);
+    const mine = sessions.filter((s) => s.user_id === user?.id);
+    const team = sessions.filter((s) => s.user_id !== user?.id);
+    setMyStats(buildStats(mine));
+    setTeamStats(buildStats(team));
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {
-      computeStats(period).then(setStats);
-    }, [period])
+      loadStats(period);
+    }, [period, loadStats])
   );
 
-  const totalMinutes = stats.reduce((sum, s) => sum + s.total_minutes, 0);
+  const myTotal = myStats.reduce((sum, s) => sum + s.total_minutes, 0);
+  const teamTotal = teamStats.reduce((sum, s) => sum + s.total_minutes, 0);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
         {/* Period selector */}
-        <View style={styles.tabs}>
+        <View style={styles.periodBar}>
           {PERIODS.map((p) => (
             <TouchableOpacity
               key={p.key}
-              style={[styles.tab, period === p.key && styles.tabActive]}
-              onPress={() => {
-                setPeriod(p.key);
-                computeStats(p.key).then(setStats);
-              }}
+              style={[styles.periodBtn, period === p.key && styles.periodBtnActive]}
+              onPress={() => { setPeriod(p.key); loadStats(p.key); }}
               activeOpacity={0.75}
             >
-              <Text style={[styles.tabText, period === p.key && styles.tabTextActive]}>
+              <Text style={[styles.periodText, period === p.key && styles.periodTextActive]}>
                 {p.label}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Donut chart */}
-        <View style={styles.chartWrapper}>
-          <DonutChart stats={stats} totalMinutes={totalMinutes} />
+        {/* My Sessions card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>My Sessions</Text>
+          <View style={styles.chartWrapper}>
+            <DonutChart stats={myStats} totalMinutes={myTotal} />
+          </View>
+          {myStats.length === 0 ? (
+            <Text style={styles.empty}>No data for this period</Text>
+          ) : (
+            <View style={styles.legend}>
+              {myStats.map((stat) => (
+                <View key={stat.project_key} style={styles.legendRow}>
+                  <View style={styles.legendLeft}>
+                    <View style={[styles.legendDot, { backgroundColor: stat.project_color }]} />
+                    <Text style={styles.legendName}>{stat.project_name}</Text>
+                  </View>
+                  <View style={styles.legendRight}>
+                    <Text style={styles.legendTime}>{formatMinutes(stat.total_minutes)}</Text>
+                    <Text style={styles.legendPct}>{Math.round(stat.percentage)}%</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
-        {/* Legend */}
-        {stats.length === 0 ? (
-          <Text style={styles.empty}>No sessions recorded for this period.</Text>
-        ) : (
-          <View style={styles.legend}>
-            {stats.map((stat) => (
-              <View key={stat.project_key} style={styles.legendRow}>
-                <View style={styles.legendLeft}>
-                  <View style={[styles.legendDot, { backgroundColor: stat.project_color }]} />
-                  <Text style={styles.legendName}>{stat.project_name}</Text>
-                </View>
-                <View style={styles.legendRight}>
-                  <Text style={styles.legendTime}>{formatMinutes(stat.total_minutes)}</Text>
-                  <Text style={styles.legendPct}>{Math.round(stat.percentage)}%</Text>
-                </View>
-              </View>
-            ))}
+        {/* Team Sessions card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Team Sessions</Text>
+          <View style={styles.chartWrapper}>
+            <DonutChart stats={teamStats} totalMinutes={teamTotal} />
           </View>
-        )}
+          {teamStats.length === 0 ? (
+            <Text style={styles.empty}>No team activity for this period</Text>
+          ) : (
+            <View style={styles.legend}>
+              {teamStats.map((stat) => (
+                <View key={stat.project_key} style={styles.legendRow}>
+                  <View style={styles.legendLeft}>
+                    <View style={[styles.legendDot, { backgroundColor: stat.project_color }]} />
+                    <Text style={styles.legendName}>{stat.project_name}</Text>
+                  </View>
+                  <View style={styles.legendRight}>
+                    <Text style={styles.legendTime}>{formatMinutes(stat.total_minutes)}</Text>
+                    <Text style={styles.legendPct}>{Math.round(stat.percentage)}%</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* Space for bottom bar */}
+        <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Fixed bottom action bar */}
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          style={styles.clockBtn}
+          onPress={() => router.push('/clock-in')}
+          activeOpacity={0.9}
+        >
+          <View style={styles.clockIconRing}>
+            <View style={styles.clockHandH} />
+            <View style={styles.clockHandM} />
+            <View style={styles.clockCenter} />
+          </View>
+          <Text style={styles.clockBtnText}>Clock In</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
@@ -215,84 +247,105 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e3545',
   },
   scroll: {
-    paddingBottom: 48,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 16,
   },
-  tabs: {
+
+  // Period selector
+  periodBar: {
     flexDirection: 'row',
-    marginHorizontal: 20,
-    marginTop: 20,
     backgroundColor: '#233d4d',
     borderRadius: 12,
     padding: 4,
     borderWidth: 1,
     borderColor: '#2d4f62',
+    marginBottom: 16,
   },
-  tab: {
+  periodBtn: {
     flex: 1,
     paddingVertical: 10,
     borderRadius: 9,
     alignItems: 'center',
   },
-  tabActive: {
+  periodBtnActive: {
     backgroundColor: '#fe7f2d',
   },
-  tabText: {
+  periodText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#7aa3b8',
   },
-  tabTextActive: {
-    color: '#233d4d',
+  periodTextActive: {
+    color: '#ffffff',
+  },
+
+  // Full-width vertical card
+  card: {
+    backgroundColor: '#233d4d',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    overflow: 'hidden',
+    marginBottom: 14,
+  },
+  cardTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#7aa3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 4,
   },
   chartWrapper: {
     alignItems: 'center',
-    marginTop: 32,
-    marginBottom: 12,
+    paddingVertical: 10,
   },
   empty: {
     textAlign: 'center',
     color: '#7aa3b8',
-    fontSize: 15,
-    marginTop: 16,
-    paddingHorizontal: 40,
+    fontSize: 13,
+    paddingVertical: 20,
   },
+
+  // Legend
   legend: {
-    marginHorizontal: 20,
-    marginTop: 8,
-    backgroundColor: '#233d4d',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#2d4f62',
-    overflow: 'hidden',
+    borderTopWidth: 1,
+    borderTopColor: '#2d4f62',
   },
   legendRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 18,
     borderBottomWidth: 1,
     borderBottomColor: '#2d4f62',
   },
   legendLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+    flex: 1,
+    marginRight: 8,
   },
   legendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    flexShrink: 0,
   },
   legendName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#ffffff',
+    flex: 1,
   },
   legendRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    alignItems: 'flex-end',
+    gap: 2,
   },
   legendTime: {
     fontSize: 14,
@@ -300,10 +353,82 @@ const styles = StyleSheet.create({
     color: '#fe7f2d',
   },
   legendPct: {
-    fontSize: 13,
+    fontSize: 11,
     color: '#7aa3b8',
     fontWeight: '600',
-    width: 38,
-    textAlign: 'right',
+  },
+
+  // Bottom action bar
+  bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#1e3545',
+    borderTopWidth: 1,
+    borderTopColor: '#2d4f62',
+    paddingTop: 12,
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  clockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fe7f2d',
+    paddingVertical: 14,
+    paddingHorizontal: 36,
+    borderRadius: 32,
+    shadowColor: '#fe7f2d',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  clockIconRing: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  clockHandH: {
+    position: 'absolute',
+    width: 1.5,
+    height: 6,
+    backgroundColor: '#ffffff',
+    borderRadius: 1,
+    bottom: '50%',
+    left: '50%',
+    marginLeft: -0.75,
+    transformOrigin: 'bottom',
+    transform: [{ rotate: '-30deg' }],
+  },
+  clockHandM: {
+    position: 'absolute',
+    width: 1.5,
+    height: 7,
+    backgroundColor: '#ffffff',
+    borderRadius: 1,
+    bottom: '50%',
+    left: '50%',
+    marginLeft: -0.75,
+    transformOrigin: 'bottom',
+    transform: [{ rotate: '60deg' }],
+  },
+  clockCenter: {
+    width: 2.5,
+    height: 2.5,
+    borderRadius: 1.25,
+    backgroundColor: '#ffffff',
+  },
+  clockBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });

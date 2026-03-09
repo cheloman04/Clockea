@@ -1,77 +1,46 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
-type ProfileRow = {
-  full_name: string;
-  team_id: string | null;
-};
-
-type TeamRow = {
-  id: string;
-  name: string;
-  code: string;
-  created_by: string | null;
-};
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, signOut, joinTeam } = useAuth();
+  const { user, signOut, joinTeam, userTeams, activeTeamId, switchTeam } = useAuth();
   const [fullName, setFullName] = useState('');
-  const [teamName, setTeamName] = useState('');
-  const [teamCode, setTeamCode] = useState('');
-  const [role, setRole] = useState<'Admin' | 'Participant' | 'No Team'>('No Team');
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<Array<{ id: string; full_name: string }>>([]);
+
+  // Derive active team info from AuthContext
+  const activeTeam = userTeams.find((t) => t.id === activeTeamId) ?? null;
+  const role = activeTeam
+    ? activeTeam.created_by === user?.id ? 'Admin' : 'Participant'
+    : 'No Team';
 
   const loadProfile = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
-    setError('');
-
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile } = await supabase
       .from('profiles')
-      .select('full_name, team_id')
+      .select('full_name')
       .eq('id', user.id)
-      .single<ProfileRow>();
+      .single();
+    setFullName(profile?.full_name || user.user_metadata?.full_name || '');
 
-    if (profileError) {
-      setError(profileError.message);
-      setLoading(false);
-      return;
+    // Load teammates via security-definer function
+    const { data: ids } = await supabase.rpc('get_teammate_ids', { p_user_id: user.id });
+    if (ids && (ids as string[]).length > 0) {
+      const { data: members } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', ids as string[]);
+      setTeamMembers((members ?? []) as Array<{ id: string; full_name: string }>);
+    } else {
+      setTeamMembers([]);
     }
-
-    setFullName(profile.full_name || user.user_metadata?.full_name || '');
-
-    if (!profile.team_id) {
-      setTeamName('');
-      setTeamCode('');
-      setRole('No Team');
-      setLoading(false);
-      return;
-    }
-
-    const { data: team, error: teamError } = await supabase
-      .from('teams')
-      .select('id, name, code, created_by')
-      .eq('id', profile.team_id)
-      .single<TeamRow>();
-
-    if (teamError) {
-      setError(teamError.message);
-      setLoading(false);
-      return;
-    }
-
-    setTeamName(team.name);
-    setTeamCode(team.code);
-    setRole(team.created_by === user.id ? 'Admin' : 'Participant');
-    setLoading(false);
   }, [user]);
 
   useFocusEffect(
@@ -79,6 +48,33 @@ export default function ProfileScreen() {
       loadProfile();
     }, [loadProfile])
   );
+
+  async function handleRemoveMember(memberId: string, memberName: string) {
+    if (!activeTeamId) return;
+    Alert.alert(
+      'Remove Member',
+      `Remove ${memberName} from the team?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('team_members')
+              .delete()
+              .eq('user_id', memberId)
+              .eq('team_id', activeTeamId);
+            if (error) {
+              setError(error.message);
+            } else {
+              await loadProfile();
+            }
+          },
+        },
+      ]
+    );
+  }
 
   async function handleJoinTeam() {
     if (!joinCode.trim()) return;
@@ -94,6 +90,51 @@ export default function ProfileScreen() {
     await loadProfile();
   }
 
+  function getLocalCutoff(period: 'day' | 'week' | 'month' | 'all'): string {
+    if (period === 'all') return new Date(0).toISOString();
+    const d = new Date();
+    if (period === 'day') {
+      d.setHours(0, 0, 0, 0);
+    } else if (period === 'week') {
+      d.setDate(d.getDate() - d.getDay());
+      d.setHours(0, 0, 0, 0);
+    } else if (period === 'month') {
+      d.setDate(1);
+      d.setHours(0, 0, 0, 0);
+    }
+    return d.toISOString();
+  }
+
+  async function handleFlush(period: 'day' | 'week' | 'month' | 'all') {
+    if (!activeTeamId) return;
+    const periodLabel = { day: 'today', week: 'this week', month: 'this month', all: 'ALL TIME' }[period];
+    Alert.alert(
+      'Delete Session Logs',
+      `Are you sure you want to delete all session logs from ${periodLabel}?\n\nThis action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { data, error } = await supabase.rpc('admin_flush_sessions', {
+                p_cutoff: getLocalCutoff(period),
+                p_team_id: activeTeamId,
+              });
+              if (error) throw error;
+              const count = data ?? 0;
+              Alert.alert('Done', `${count} session${count !== 1 ? 's' : ''} deleted.`);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : 'Could not delete sessions.';
+              Alert.alert('Error', msg);
+            }
+          },
+        },
+      ]
+    );
+  }
+
   async function handleLogout() {
     try {
       await signOut();
@@ -106,7 +147,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.inner}>
+      <ScrollView style={styles.inner} contentContainerStyle={{ paddingBottom: 32 }}>
         <View style={styles.hero}>
           <View style={styles.avatar}>
             <View style={styles.avatarHead} />
@@ -126,12 +167,12 @@ export default function ProfileScreen() {
           <Text style={styles.value}>{user?.email ?? 'No email'}</Text>
 
           <Text style={styles.label}>Team</Text>
-          <Text style={styles.value}>{teamName || 'No team yet'}</Text>
+          <Text style={styles.value}>{activeTeam?.name || 'No team yet'}</Text>
 
-          {teamCode ? (
+          {activeTeam?.code ? (
             <>
               <Text style={styles.label}>Team Code</Text>
-              <Text style={styles.value}>{teamCode}</Text>
+              <Text style={styles.value}>{activeTeam.code}</Text>
             </>
           ) : null}
 
@@ -139,7 +180,66 @@ export default function ProfileScreen() {
           <Text style={[styles.value, role === 'Admin' && styles.adminRole]}>{role}</Text>
         </View>
 
-        {role === 'No Team' ? (
+        {/* Team Switcher */}
+        {userTeams.length > 0 && (
+          <View style={styles.teamsCard}>
+            <Text style={styles.label}>My Teams</Text>
+            {userTeams.map((team) => {
+              const isActive = team.id === activeTeamId;
+              return (
+                <TouchableOpacity
+                  key={team.id}
+                  style={[styles.teamRow, isActive && styles.teamRowActive]}
+                  onPress={() => !isActive && switchTeam(team.id)}
+                  activeOpacity={isActive ? 1 : 0.7}
+                >
+                  <View style={styles.teamRowLeft}>
+                    <View style={[styles.teamDot, isActive && styles.teamDotActive]} />
+                    <Text style={[styles.teamName, isActive && styles.teamNameActive]}>
+                      {team.name}
+                    </Text>
+                  </View>
+                  {isActive ? (
+                    <Text style={styles.teamActiveBadge}>Active</Text>
+                  ) : (
+                    <Text style={styles.teamSwitch}>Switch</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+            {/* Team members subsection */}
+            {teamMembers.length > 0 && (
+              <View style={styles.membersSection}>
+                <Text style={styles.membersTitle}>Members</Text>
+                {teamMembers.map((member) => (
+                  <View key={member.id} style={styles.memberRow}>
+                    <View style={styles.memberAvatar}>
+                      <Text style={styles.memberInitial}>
+                        {(member.full_name ?? '?').charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text style={styles.memberName}>
+                      {member.full_name ?? 'Unknown'}
+                      {member.id === user?.id ? ' (you)' : ''}
+                    </Text>
+                    {role === 'Admin' && member.id !== user?.id && (
+                      <TouchableOpacity
+                        style={styles.removeBtn}
+                        onPress={() => handleRemoveMember(member.id, member.full_name ?? 'this member')}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.removeBtnText}>Remove</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Join team if not in any */}
+        {userTeams.length === 0 && (
           <View style={styles.joinCard}>
             <Text style={styles.label}>Join Team With Code</Text>
             <TextInput
@@ -161,25 +261,51 @@ export default function ProfileScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        ) : null}
+        )}
 
         <TouchableOpacity
           style={styles.secondaryBtn}
           onPress={() => router.push('/create-team')}
           activeOpacity={0.85}
         >
-          <Text style={styles.secondaryBtnText}>Create Team Code</Text>
+          <Text style={styles.secondaryBtnText}>Create New Team</Text>
         </TouchableOpacity>
 
+        {/* Admin: Session Log Management */}
+        {role === 'Admin' && activeTeamId && (
+          <View style={styles.adminCard}>
+            <Text style={styles.adminCardTitle}>Session Log Management</Text>
+            <Text style={styles.adminCardHint}>
+              Permanently deletes session records for this team. Admin only.
+            </Text>
+            {(
+              [
+                { period: 'day',   label: 'Flush Today' },
+                { period: 'week',  label: 'Flush This Week' },
+                { period: 'month', label: 'Flush This Month' },
+                { period: 'all',   label: 'Flush All Logs' },
+              ] as const
+            ).map(({ period, label }) => (
+              <TouchableOpacity
+                key={period}
+                style={[styles.flushBtn, period === 'all' && styles.flushBtnAll]}
+                onPress={() => handleFlush(period)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.flushBtnText}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         <TouchableOpacity
-          style={[styles.logoutBtn, loading && styles.logoutBtnDisabled]}
+          style={styles.logoutBtn}
           onPress={handleLogout}
-          disabled={loading}
           activeOpacity={0.85}
         >
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -190,7 +316,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e3545',
   },
   inner: {
-    flex: 1,
     padding: 24,
   },
   hero: {
@@ -319,5 +444,166 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  teamsCard: {
+    marginTop: 16,
+    backgroundColor: '#233d4d',
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  teamRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d4f62',
+  },
+  teamRowActive: {
+    backgroundColor: '#fe7f2d18',
+  },
+  teamRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  teamDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4a6d80',
+  },
+  teamDotActive: {
+    backgroundColor: '#fe7f2d',
+  },
+  teamName: {
+    color: '#7aa3b8',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  teamNameActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  teamActiveBadge: {
+    color: '#fe7f2d',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  teamSwitch: {
+    color: '#7aa3b8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  membersSection: {
+    borderTopWidth: 1,
+    borderTopColor: '#2d4f62',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 14,
+  },
+  membersTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7aa3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 10,
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  memberAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#2d4f62',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberInitial: {
+    color: '#fe7f2d',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  memberName: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+  },
+  removeBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EF444466',
+  },
+  removeBtnText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  joinBtn: {
+    marginTop: 10,
+    backgroundColor: '#2d4f62',
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  joinBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+
+  // Admin flush card
+  adminCard: {
+    marginTop: 16,
+    backgroundColor: '#233d4d',
+    borderWidth: 1,
+    borderColor: '#EF444433',
+    borderRadius: 14,
+    padding: 16,
+  },
+  adminCardTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#EF4444',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  adminCardHint: {
+    fontSize: 12,
+    color: '#4a6d80',
+    marginBottom: 14,
+    lineHeight: 17,
+  },
+  flushBtn: {
+    backgroundColor: '#2d4f62',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  flushBtnAll: {
+    backgroundColor: '#EF444415',
+    borderWidth: 1,
+    borderColor: '#EF444455',
+    marginBottom: 0,
+  },
+  flushBtnText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

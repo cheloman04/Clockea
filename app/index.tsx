@@ -1,7 +1,8 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  FlatList,
+  Animated,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -11,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionItem from '../components/SessionItem';
 import {
   getActiveSession,
+  getActiveSessions,
   getTodaySessions,
   getTodayTotalMinutes,
 } from '../database/storage';
@@ -18,134 +20,292 @@ import { Session } from '../database/types';
 import { useAuth } from '../contexts/AuthContext';
 import { formatMinutes } from '../utils/time';
 
+type Tab = 'mine' | 'team';
+
+function formatElapsed(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [todaySessions, setTodaySessions] = useState<Session[]>([]);
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [activeTab, setActiveTab] = useState<Tab>('mine');
+  const [liveTeam, setLiveTeam] = useState<Session[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useFocusEffect(
     useCallback(() => {
       async function load() {
         const active = await getActiveSession();
-        if (active) {
-          router.replace('/working');
-          return;
-        }
+        setActiveSession(active);
         setTodayMinutes(await getTodayTotalMinutes());
         setTodaySessions(await getTodaySessions());
+        const all = await getActiveSessions();
+        setLiveTeam(all.filter((s) => s.user_id !== user?.id));
       }
       load();
-    }, [])
+    }, [user])
   );
 
-  const projectTotals = todaySessions.reduce<Record<string, { name: string; minutes: number }>>(
+  // Single shared tick for all live teammate timers
+  useEffect(() => {
+    if (liveTeam.length === 0) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [liveTeam.length]);
+
+  // Live elapsed timer when clocked in
+  useEffect(() => {
+    if (!activeSession) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const startMs = new Date(activeSession.start_time).getTime();
+    const breakSecs = activeSession.total_break_seconds ?? 0;
+    const tick = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startMs) / 1000) - breakSecs));
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [activeSession]);
+
+  function handleClockPress() {
+    Animated.sequence([
+      Animated.spring(pulseAnim, { toValue: 0.88, useNativeDriver: true, speed: 40, bounciness: 0 }),
+      Animated.spring(pulseAnim, { toValue: 1, useNativeDriver: true, speed: 16, bounciness: 8 }),
+    ]).start();
+    if (activeSession) {
+      router.push('/working');
+    } else {
+      router.push('/clock-in');
+    }
+  }
+
+  const mySessions = todaySessions.filter((s) => s.user_id === user?.id);
+  const teamSessions = todaySessions.filter((s) => s.user_id !== user?.id);
+
+  const myProjectTotals = mySessions.reduce<Record<string, { name: string; minutes: number }>>(
     (acc, session) => {
       const key = String(session.project_id);
-      if (!acc[key]) {
-        acc[key] = { name: session.project_name ?? 'Unknown', minutes: 0 };
-      }
+      if (!acc[key]) acc[key] = { name: session.project_name ?? 'Unknown', minutes: 0 };
       acc[key].minutes += session.duration_minutes ?? 0;
       return acc;
     },
     {}
   );
 
-  const topProject = Object.values(projectTotals).sort((a, b) => b.minutes - a.minutes)[0];
-  const averageMinutes =
-    todaySessions.length > 0 ? Math.round(todayMinutes / todaySessions.length) : 0;
+  const topProject = Object.values(myProjectTotals).sort((a, b) => b.minutes - a.minutes)[0];
+  const averageMinutes = mySessions.length > 0 ? Math.round(todayMinutes / mySessions.length) : 0;
   const fullName = (user?.user_metadata?.full_name as string | undefined)?.trim() ?? '';
   const firstName = fullName.split(/\s+/).filter(Boolean)[0] ?? 'User';
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          style={styles.profileIconBtn}
-          onPress={() => router.push('/profile')}
-          activeOpacity={0.85}
-        >
-          <View style={styles.profileIconHead} />
-          <View style={styles.profileIconBody} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.hero}>
-        <Text style={styles.heroHeading}>Ready to Create, {firstName}?</Text>
-        <Text style={styles.heroLabel}>Today</Text>
-        <Text style={styles.heroTime}>
-          {todayMinutes === 0 ? '0m' : formatMinutes(todayMinutes)}
-        </Text>
-      </View>
-
-      <TouchableOpacity
-        style={styles.snapshotCard}
-        onPress={() => router.push('/stats')}
-        activeOpacity={0.85}
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.snapshotHeader}>
-          <Text style={styles.snapshotTitle}>Analytics Snapshot</Text>
-          <Text style={styles.snapshotLink}>View details</Text>
-        </View>
-        <View style={styles.snapshotRow}>
-          <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>Sessions</Text>
-            <Text style={styles.metricValue}>{todaySessions.length}</Text>
-          </View>
-          <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>Focus Project</Text>
-            <Text style={styles.metricValueSmall}>
-              {topProject ? topProject.name : 'No data'}
-            </Text>
-            <Text style={styles.metricHint}>
-              {topProject ? formatMinutes(Math.round(topProject.minutes)) : '0m'}
-            </Text>
-          </View>
-          <View style={styles.metricItem}>
-            <Text style={styles.metricLabel}>Avg / Session</Text>
-            <Text style={styles.metricValue}>{averageMinutes}m</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recent Sessions</Text>
-          {todaySessions.length > 0 && (
-            <TouchableOpacity onPress={() => router.push('/history')}>
-              <Text style={styles.seeAll}>See all</Text>
+        {/* Hero — context-aware */}
+        {activeSession ? (
+          <View style={[styles.hero, styles.heroActive]}>
+            <Text style={styles.heroActiveLabel}>Currently working on</Text>
+            <Text style={styles.heroActiveProject}>{activeSession.project_name ?? 'Unknown'}</Text>
+            <Text style={styles.heroTimer}>{formatElapsed(elapsedSeconds)}</Text>
+            <TouchableOpacity
+              style={styles.heroViewBtn}
+              onPress={() => router.push('/working')}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.heroViewBtnText}>View details →</Text>
             </TouchableOpacity>
-          )}
-        </View>
-
-        {todaySessions.length === 0 ? (
-          <Text style={styles.empty}>
-            No sessions today.{'\n'}Tap Clock In to start tracking.
-          </Text>
+          </View>
         ) : (
-          <FlatList
-            data={todaySessions}
-            keyExtractor={(item) => item.id.toString()}
-            renderItem={({ item }) => <SessionItem session={item} />}
-          />
+          <View style={styles.hero}>
+            <Text style={styles.heroHeading}>Turn time into progress, {firstName}!</Text>
+            <Text style={styles.heroLabel}>Today</Text>
+            <Text style={styles.heroTime}>
+              {todayMinutes === 0 ? '0m' : formatMinutes(todayMinutes)}
+            </Text>
+          </View>
         )}
-      </View>
 
-      <View style={styles.actions}>
+        {/* Analytics snapshot */}
         <TouchableOpacity
-          style={styles.primaryBtn}
+          style={styles.snapshotCard}
           onPress={() => router.push('/stats')}
           activeOpacity={0.85}
         >
-          <Text style={styles.primaryBtnText}>Analytics</Text>
+          <View style={styles.snapshotHeader}>
+            <Text style={styles.snapshotTitle}>Analytics Snapshot</Text>
+            <Text style={styles.snapshotLink}>View Details</Text>
+          </View>
+          <View style={styles.snapshotRow}>
+            <View style={styles.metricItem}>
+              <Text style={styles.metricLabel}>Sessions</Text>
+              <Text style={styles.metricValue}>{mySessions.length}</Text>
+            </View>
+            <View style={styles.metricItem}>
+              <Text style={styles.metricLabel}>Focus Project</Text>
+              <Text style={styles.metricValueSmall}>
+                {topProject ? topProject.name : 'No data'}
+              </Text>
+              <Text style={styles.metricHint}>
+                {topProject ? formatMinutes(Math.round(topProject.minutes)) : '0m'}
+              </Text>
+            </View>
+            <View style={styles.metricItem}>
+              <Text style={styles.metricLabel}>Avg / Session</Text>
+              <Text style={styles.metricValue}>{averageMinutes}m</Text>
+            </View>
+          </View>
         </TouchableOpacity>
+
+        {/* Live Now — teammates currently working */}
+        {liveTeam.length > 0 && (
+          <View style={styles.liveCard}>
+            <View style={styles.liveHeader}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveTitle}>Live Now</Text>
+              <Text style={styles.liveCount}>{liveTeam.length}</Text>
+            </View>
+            {liveTeam.map((s) => {
+              const elapsedSec = Math.max(0, Math.floor((now - new Date(s.start_time).getTime()) / 1000));
+              const h = Math.floor(elapsedSec / 3600);
+              const m = Math.floor((elapsedSec % 3600) / 60);
+              const elapsed = h > 0 ? `${h}h ${m}m` : `${m}m`;
+              return (
+                <View key={s.id} style={styles.liveRow}>
+                  <View style={[styles.liveProjDot, { backgroundColor: s.project_color ?? '#ccc' }]} />
+                  <Text style={styles.liveName} numberOfLines={1}>
+                    {s.user_full_name ?? 'Teammate'}
+                  </Text>
+                  <Text style={styles.liveProject} numberOfLines={1}>
+                    {s.project_name ?? '—'}
+                  </Text>
+                  <Text style={styles.liveElapsed}>{elapsed}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Tabbed sessions */}
+        <View style={styles.sessionsCard}>
+          <View style={styles.tabBar}>
+            <TouchableOpacity
+              style={[styles.tabBtn, activeTab === 'mine' && styles.tabBtnActive]}
+              onPress={() => setActiveTab('mine')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.tabLabel, activeTab === 'mine' && styles.tabLabelActive]}>
+                Your Sessions
+              </Text>
+              {mySessions.length > 0 && (
+                <View style={[styles.tabBadge, activeTab === 'mine' && styles.tabBadgeActive]}>
+                  <Text style={[styles.tabBadgeText, activeTab === 'mine' && styles.tabBadgeTextActive]}>
+                    {mySessions.length}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tabBtn, activeTab === 'team' && styles.tabBtnActive]}
+              onPress={() => setActiveTab('team')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.tabLabel, activeTab === 'team' && styles.tabLabelActive]}>
+                Team Sessions
+              </Text>
+              {teamSessions.length > 0 && (
+                <View style={[styles.tabBadge, activeTab === 'team' && styles.tabBadgeActive]}>
+                  <Text style={[styles.tabBadgeText, activeTab === 'team' && styles.tabBadgeTextActive]}>
+                    {teamSessions.length}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {activeTab === 'mine' ? (
+            mySessions.length === 0 ? (
+              <Text style={styles.empty}>No sessions today.</Text>
+            ) : (
+              <>
+                {mySessions.slice(0, 4).map((item) => (
+                  <SessionItem key={item.id} session={item} hideMember />
+                ))}
+                {mySessions.length > 4 && (
+                  <TouchableOpacity
+                    style={styles.seeAllRow}
+                    onPress={() => router.push('/history')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.seeAllText}>View more →</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )
+          ) : (
+            teamSessions.length === 0 ? (
+              <Text style={styles.empty}>No team activity today.</Text>
+            ) : (
+              <>
+                {teamSessions.slice(0, 4).map((item) => (
+                  <SessionItem key={item.id} session={item} prominentMember />
+                ))}
+                {teamSessions.length > 4 && (
+                  <TouchableOpacity
+                    style={styles.seeAllRow}
+                    onPress={() => router.push('/history')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.seeAllText}>View more →</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )
+          )}
+        </View>
+
         <TouchableOpacity
-          style={styles.primaryBtn}
-          onPress={() => router.push('/clock-in')}
+          style={styles.analyticsBtn}
+          onPress={() => router.push('/stats')}
           activeOpacity={0.85}
         >
-          <Text style={styles.primaryBtnText}>Clock In</Text>
+          <Text style={styles.analyticsBtnText}>Analytics</Text>
         </TouchableOpacity>
+
+        {/* Space for bottom bar */}
+        <View style={{ height: 100 }} />
+      </ScrollView>
+
+      {/* Fixed bottom action bar */}
+      <View style={styles.bottomBar}>
+        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+          <TouchableOpacity
+            style={[styles.clockBtn, activeSession && styles.clockBtnActive]}
+            onPress={handleClockPress}
+            activeOpacity={0.9}
+          >
+            <View style={styles.clockIconRing}>
+              <View style={styles.clockHandH} />
+              <View style={styles.clockHandM} />
+              <View style={styles.clockCenter} />
+            </View>
+            <Text style={styles.clockBtnText}>
+              {activeSession ? 'Clock Out' : 'Clock In'}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
       </View>
     </SafeAreaView>
   );
@@ -155,87 +315,95 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#1e3545',
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 20,
   },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    marginBottom: 16,
+  scroll: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 16,
   },
-  profileIconBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    borderWidth: 2,
-    borderColor: '#fe7f2d',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#233d4d',
-  },
-  profileIconHead: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#fe7f2d',
-    marginBottom: 3,
-  },
-  profileIconBody: {
-    width: 22,
-    height: 10,
-    borderTopLeftRadius: 11,
-    borderTopRightRadius: 11,
-    backgroundColor: '#fe7f2d',
-  },
+
+  // Hero — idle
   hero: {
     alignItems: 'center',
-    paddingVertical: 18,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
     backgroundColor: '#233d4d',
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#2d4f62',
   },
   heroHeading: {
-    fontSize: 42,
+    fontSize: 26,
     color: '#ffffff',
     fontWeight: '700',
-    marginBottom: 10,
-    letterSpacing: -1,
+    marginBottom: 8,
+    letterSpacing: -0.5,
     textAlign: 'center',
   },
   heroLabel: {
-    fontSize: 16,
+    fontSize: 12,
     color: '#7aa3b8',
     textTransform: 'uppercase',
     letterSpacing: 2,
-    marginBottom: 12,
+    marginBottom: 6,
     fontWeight: '600',
   },
   heroTime: {
-    fontSize: 56,
+    fontSize: 52,
     fontWeight: '300',
     color: '#ffffff',
     letterSpacing: -1,
   },
-  section: {
-    flex: 1,
-    marginTop: 14,
-    marginBottom: 14,
-    backgroundColor: '#233d4d',
-    borderRadius: 14,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#2d4f62',
+
+  // Hero — active session
+  heroActive: {
+    borderColor: '#fe7f2d44',
+    backgroundColor: '#1e3545',
+    borderWidth: 1.5,
   },
+  heroActiveLabel: {
+    fontSize: 12,
+    color: '#7aa3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  heroActiveProject: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 10,
+  },
+  heroTimer: {
+    fontSize: 44,
+    fontWeight: '200',
+    color: '#fe7f2d',
+    letterSpacing: 2,
+    fontVariant: ['tabular-nums'],
+  },
+  heroViewBtn: {
+    marginTop: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#fe7f2d55',
+  },
+  heroViewBtnText: {
+    color: '#fe7f2d',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // Snapshot card
   snapshotCard: {
     marginTop: 12,
     backgroundColor: '#233d4d',
     borderWidth: 1,
     borderColor: '#2d4f62',
-    borderRadius: 14,
-    padding: 14,
+    borderRadius: 16,
+    padding: 16,
   },
   snapshotHeader: {
     flexDirection: 'row',
@@ -245,44 +413,43 @@ const styles = StyleSheet.create({
   },
   snapshotTitle: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    letterSpacing: 0.3,
   },
   snapshotLink: {
     color: '#fe7f2d',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
   snapshotRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   metricItem: {
     flex: 1,
     backgroundColor: '#1e3545',
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#2d4f62',
     paddingVertical: 10,
     paddingHorizontal: 10,
-    minHeight: 76,
+    minHeight: 72,
   },
   metricLabel: {
     color: '#7aa3b8',
-    fontSize: 10,
+    fontSize: 9,
     textTransform: 'uppercase',
     letterSpacing: 1.2,
     fontWeight: '700',
-    marginBottom: 6,
+    marginBottom: 5,
   },
   metricValue: {
     color: '#ffffff',
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
-    lineHeight: 28,
+    lineHeight: 26,
   },
   metricValueSmall: {
     color: '#ffffff',
@@ -292,42 +459,161 @@ const styles = StyleSheet.create({
   },
   metricHint: {
     color: '#fe7f2d',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     marginTop: 2,
   },
-  sectionHeader: {
+
+  // Live Now card
+  liveCard: {
+    marginTop: 12,
+    backgroundColor: '#233d4d',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    overflow: 'hidden',
+  },
+  liveHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#2d4f62',
   },
-  sectionTitle: {
-    fontSize: 12,
+  liveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#4ade80',
+  },
+  liveTitle: {
+    flex: 1,
+    fontSize: 11,
     fontWeight: '700',
     color: '#7aa3b8',
     textTransform: 'uppercase',
     letterSpacing: 1.5,
   },
-  seeAll: {
-    fontSize: 13,
-    color: '#fe7f2d',
+  liveCount: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4ade80',
+  },
+  liveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d4f62',
+  },
+  liveProjDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    flexShrink: 0,
+  },
+  liveName: {
+    fontSize: 14,
     fontWeight: '600',
+    color: '#ffffff',
+    flex: 1,
+  },
+  liveProject: {
+    fontSize: 13,
+    color: '#7aa3b8',
+    flex: 1,
+    textAlign: 'right',
+  },
+  liveElapsed: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fe7f2d',
+    marginLeft: 10,
+    minWidth: 36,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
+
+  // Sessions tab card
+  sessionsCard: {
+    marginTop: 12,
+    backgroundColor: '#233d4d',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    overflow: 'hidden',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d4f62',
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabBtnActive: {
+    borderBottomColor: '#fe7f2d',
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4a6d80',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  tabLabelActive: {
+    color: '#fe7f2d',
+  },
+  tabBadge: {
+    backgroundColor: '#2d4f62',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  tabBadgeActive: {
+    backgroundColor: '#fe7f2d22',
+  },
+  tabBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7aa3b8',
+  },
+  tabBadgeTextActive: {
+    color: '#fe7f2d',
   },
   empty: {
-    padding: 32,
+    padding: 24,
     textAlign: 'center',
     color: '#7aa3b8',
-    fontSize: 15,
-    lineHeight: 24,
+    fontSize: 13,
   },
-  actions: {
-    gap: 12,
+  seeAllRow: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#2d4f62',
   },
-  primaryBtn: {
+  seeAllText: {
+    color: '#fe7f2d',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  analyticsBtn: {
+    marginTop: 12,
     backgroundColor: '#fe7f2d',
     borderRadius: 14,
     alignItems: 'center',
@@ -338,9 +624,86 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
-  primaryBtnText: {
+  analyticsBtnText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
+  },
+
+  // Fixed bottom action bar
+  bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#1e3545',
+    borderTopWidth: 1,
+    borderTopColor: '#2d4f62',
+    paddingTop: 12,
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  clockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fe7f2d',
+    paddingVertical: 14,
+    paddingHorizontal: 36,
+    borderRadius: 32,
+    shadowColor: '#fe7f2d',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  clockBtnActive: {
+    backgroundColor: '#e05a1a',
+  },
+  clockIconRing: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  clockHandH: {
+    position: 'absolute',
+    width: 1.5,
+    height: 6,
+    backgroundColor: '#ffffff',
+    borderRadius: 1,
+    bottom: '50%',
+    left: '50%',
+    marginLeft: -0.75,
+    transformOrigin: 'bottom',
+    transform: [{ rotate: '-30deg' }],
+  },
+  clockHandM: {
+    position: 'absolute',
+    width: 1.5,
+    height: 7,
+    backgroundColor: '#ffffff',
+    borderRadius: 1,
+    bottom: '50%',
+    left: '50%',
+    marginLeft: -0.75,
+    transformOrigin: 'bottom',
+    transform: [{ rotate: '60deg' }],
+  },
+  clockCenter: {
+    width: 2.5,
+    height: 2.5,
+    borderRadius: 1.25,
+    backgroundColor: '#ffffff',
+  },
+  clockBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });

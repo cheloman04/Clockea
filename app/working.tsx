@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -10,12 +11,20 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Timer from '../components/Timer';
-import { clockOut, endBreak, getActiveSession, startBreak } from '../database/storage';
-import { Session } from '../database/types';
+import {
+  clockOut,
+  endBreak,
+  getActiveSession,
+  getSessionObjectives,
+  startBreak,
+  toggleObjectiveComplete,
+} from '../database/storage';
+import { Session, SessionObjective } from '../database/types';
 
 export default function WorkingScreen() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
+  const [objectives, setObjectives] = useState<SessionObjective[]>([]);
 
   useEffect(() => {
     getActiveSession().then((active) => {
@@ -24,6 +33,7 @@ export default function WorkingScreen() {
         return;
       }
       setSession(active);
+      getSessionObjectives(active.id).then(setObjectives);
     });
   }, []);
 
@@ -54,12 +64,34 @@ export default function WorkingScreen() {
     }
   }
 
+  async function handleToggleObjective(obj: SessionObjective) {
+    const newCompleted = !obj.completed;
+    // Optimistic update
+    setObjectives((prev) =>
+      prev.map((o) => (o.id === obj.id ? { ...o, completed: newCompleted } : o))
+    );
+    try {
+      await toggleObjectiveComplete(obj.id, newCompleted);
+    } catch {
+      // Revert on error
+      setObjectives((prev) =>
+        prev.map((o) => (o.id === obj.id ? { ...o, completed: !newCompleted } : o))
+      );
+    }
+  }
+
   function handleClockOut() {
     const doClockOut = async () => {
       if (session) {
         try {
           await clockOut(session.id);
-          router.replace({ pathname: '/session-recap', params: { sessionId: String(session.id) } });
+          router.replace({
+            pathname: '/session-recap',
+            params: {
+              sessionId: String(session.id),
+              objective: session.objective ?? '',
+            },
+          });
         } catch (e) {
           const message = e instanceof Error ? e.message : 'Could not clock out.';
           Alert.alert('Error', message);
@@ -80,11 +112,16 @@ export default function WorkingScreen() {
   if (!session) return null;
 
   const onBreak = !!session.break_start;
+  const completedCount = objectives.filter((o) => o.completed).length;
+  const totalCount = objectives.length;
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Project badge */}
-      <View style={styles.top}>
+      {/* Top bar: back + project badge */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => router.replace('/')} activeOpacity={0.7}>
+          <Text style={styles.backText}>← Dashboard</Text>
+        </TouchableOpacity>
         <View
           style={[
             styles.projectBadge,
@@ -98,30 +135,67 @@ export default function WorkingScreen() {
         </View>
       </View>
 
-      {/* Timer area */}
-      <View style={styles.timerWrapper}>
-        <Text style={styles.label}>
-          {onBreak ? 'On Break' : 'Time Elapsed'}
-        </Text>
-        <Timer
-          startTime={session.start_time}
-          totalBreakSeconds={session.total_break_seconds ?? 0}
-          breakStart={session.break_start}
-        />
-        {onBreak ? (
-          <View style={styles.breakBadge}>
-            <View style={styles.breakDot} />
-            <Text style={styles.breakBadgeText}>Timer paused</Text>
-          </View>
-        ) : (
-          <>
-            <View style={styles.divider} />
-            <Text style={styles.statusText}>Session in progress</Text>
-          </>
-        )}
-      </View>
+      {/* Scrollable middle: timer + checklist */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Timer */}
+        <View style={styles.timerWrapper}>
+          <Text style={styles.label}>
+            {onBreak ? 'On Break' : 'Time Elapsed'}
+          </Text>
+          <Timer
+            startTime={session.start_time}
+            totalBreakSeconds={session.total_break_seconds ?? 0}
+            breakStart={session.break_start}
+          />
+          {onBreak ? (
+            <View style={styles.breakBadge}>
+              <View style={styles.breakDot} />
+              <Text style={styles.breakBadgeText}>Timer paused</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.divider} />
+              <Text style={styles.statusText}>Session in progress</Text>
+            </>
+          )}
+        </View>
 
-      {/* Actions */}
+        {/* Objectives checklist */}
+        {totalCount > 0 && (
+          <View style={styles.checklist}>
+            <View style={styles.checklistHeader}>
+              <Text style={styles.checklistTitle}>Objectives</Text>
+              <Text style={[
+                styles.checklistProgress,
+                completedCount === totalCount && styles.checklistProgressDone,
+              ]}>
+                {completedCount} / {totalCount}
+              </Text>
+            </View>
+            {objectives.map((obj) => (
+              <TouchableOpacity
+                key={obj.id}
+                style={styles.checkItem}
+                onPress={() => handleToggleObjective(obj)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, obj.completed && styles.checkboxDone]}>
+                  {obj.completed && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+                <Text style={[styles.checkText, obj.completed && styles.checkTextDone]}>
+                  {obj.text}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Fixed actions */}
       <View style={styles.actions}>
         {onBreak ? (
           <TouchableOpacity
@@ -157,17 +231,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#1e3545',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 48,
-    paddingHorizontal: 24,
   },
-  top: {
-    alignItems: 'center',
+  topBar: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 12,
+    gap: 14,
+  },
+  backText: {
+    fontSize: 14,
+    color: '#7aa3b8',
+    fontWeight: '600',
   },
   projectBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'center',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 100,
@@ -183,8 +262,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.3,
   },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    alignItems: 'center',
+    gap: 32,
+  },
   timerWrapper: {
     alignItems: 'center',
+    paddingTop: 24,
+    width: '100%',
   },
   label: {
     fontSize: 11,
@@ -229,8 +319,84 @@ const styles = StyleSheet.create({
     color: '#7aa3b8',
     letterSpacing: 0.5,
   },
-  actions: {
+
+  // Checklist
+  checklist: {
     width: '100%',
+    backgroundColor: '#233d4d',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    overflow: 'hidden',
+  },
+  checklistHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d4f62',
+  },
+  checklistTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7aa3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+  },
+  checklistProgress: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#7aa3b8',
+  },
+  checklistProgressDone: {
+    color: '#4ade80',
+  },
+  checkItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d4f62',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#4a6d80',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  checkboxDone: {
+    backgroundColor: '#4ade80',
+    borderColor: '#4ade80',
+  },
+  checkmark: {
+    fontSize: 13,
+    color: '#1e3545',
+    fontWeight: '700',
+  },
+  checkText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#ffffff',
+    lineHeight: 20,
+  },
+  checkTextDone: {
+    color: '#4a6d80',
+    textDecorationLine: 'line-through',
+  },
+
+  // Actions
+  actions: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 32,
     gap: 12,
   },
   breakBtn: {

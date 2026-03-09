@@ -15,7 +15,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { signUp, joinTeam } = useAuth();
+  const { signUp } = useAuth();
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -30,22 +30,11 @@ export default function RegisterScreen() {
     setLoading(true);
     setError('');
 
-    const err = await signUp(email.trim().toLowerCase(), password, fullName.trim());
+    const err = await signUp(email.trim().toLowerCase(), password, fullName.trim(), teamCode.trim() || undefined);
     if (err) {
       setError(err);
       setLoading(false);
       return;
-    }
-
-    // If team code provided, join after a short delay for auth to settle
-    if (teamCode.trim()) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const teamErr = await joinTeam(teamCode.trim());
-      if (teamErr) {
-        setError(`Account created but couldn't join team: ${teamErr}`);
-        setLoading(false);
-        return;
-      }
     }
 
     setLoading(false);

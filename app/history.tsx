@@ -1,10 +1,11 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { SectionList, StyleSheet, Text, View } from 'react-native';
+import { Alert, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionItem from '../components/SessionItem';
-import { getAllSessions } from '../database/storage';
-import { Session } from '../database/types';
+import { deleteSession, getAllSessions, getObjectivesForSessions } from '../database/storage';
+import { Session, SessionObjective } from '../database/types';
+import { useAuth } from '../contexts/AuthContext';
 import { formatDate, formatMinutes } from '../utils/time';
 
 interface DaySection {
@@ -28,13 +29,55 @@ function groupByDay(sessions: Session[]): DaySection[] {
 }
 
 export default function HistoryScreen() {
+  const router = useRouter();
+  const { user } = useAuth();
   const [sections, setSections] = useState<DaySection[]>([]);
+  const [objectivesMap, setObjectivesMap] = useState<Record<number, SessionObjective[]>>({});
 
-  useFocusEffect(
-    useCallback(() => {
-      getAllSessions().then((sessions) => setSections(groupByDay(sessions)));
-    }, [])
-  );
+  const load = useCallback(() => {
+    getAllSessions().then(async (sessions) => {
+      setSections(groupByDay(sessions));
+      const map = await getObjectivesForSessions(sessions.map((s) => s.id));
+      setObjectivesMap(map);
+    });
+  }, []);
+
+  useFocusEffect(load);
+
+  function handleActions(session: Session) {
+    const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [
+      {
+        text: 'Edit Notes',
+        onPress: () =>
+          router.push({
+            pathname: '/edit-session',
+            params: { id: String(session.id), notes: session.notes ?? '' },
+          }),
+      },
+      {
+        text: 'Delete Session',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert(
+            'Delete Session',
+            `Delete this ${session.project_name ?? 'session'}? This cannot be undone.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  await deleteSession(session.id);
+                  load();
+                },
+              },
+            ]
+          ),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ];
+    Alert.alert(session.project_name ?? 'Session', undefined, options);
+  }
 
   if (sections.length === 0) {
     return (
@@ -49,7 +92,13 @@ export default function HistoryScreen() {
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => <SessionItem session={item} />}
+        renderItem={({ item }) => (
+          <SessionItem
+            session={item}
+            objectives={objectivesMap[item.id]}
+            onActions={item.user_id === user?.id ? () => handleActions(item) : undefined}
+          />
+        )}
         renderSectionHeader={({ section }) => (
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
