@@ -236,43 +236,47 @@ export default function HomeScreen() {
           </View>
 
           {activeTab === 'mine' ? (
-            mySessions.length === 0 ? (
-              <Text style={styles.empty}>No sessions today.</Text>
-            ) : (
-              <>
-                {mySessions.slice(0, 4).map((item) => (
+            <>
+              {Array.from({ length: 4 }, (_, i) => {
+                const item = mySessions[i];
+                return item ? (
                   <SessionItem key={item.id} session={item} hideMember />
-                ))}
-                {mySessions.length > 4 && (
-                  <TouchableOpacity
-                    style={styles.seeAllRow}
-                    onPress={() => router.push('/history')}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.seeAllText}>View more →</Text>
-                  </TouchableOpacity>
-                )}
-              </>
-            )
+                ) : (
+                  <View key={`my-empty-${i}`} style={styles.placeholderRow}>
+                    <View style={styles.placeholderDot} />
+                    <Text style={styles.placeholderText}>Your Next Session</Text>
+                  </View>
+                );
+              })}
+              <TouchableOpacity
+                style={styles.seeAllRow}
+                onPress={() => router.push('/history')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.seeAllText}>View more →</Text>
+              </TouchableOpacity>
+            </>
           ) : (
-            teamSessions.length === 0 ? (
-              <Text style={styles.empty}>No team activity today.</Text>
-            ) : (
-              <>
-                {teamSessions.slice(0, 4).map((item) => (
+            <>
+              {Array.from({ length: 4 }, (_, i) => {
+                const item = teamSessions[i];
+                return item ? (
                   <SessionItem key={item.id} session={item} prominentMember />
-                ))}
-                {teamSessions.length > 4 && (
-                  <TouchableOpacity
-                    style={styles.seeAllRow}
-                    onPress={() => router.push('/history')}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.seeAllText}>View more →</Text>
-                  </TouchableOpacity>
-                )}
-              </>
-            )
+                ) : (
+                  <View key={`team-empty-${i}`} style={styles.placeholderRow}>
+                    <View style={styles.placeholderDot} />
+                    <Text style={styles.placeholderText}>Your Next Session</Text>
+                  </View>
+                );
+              })}
+              <TouchableOpacity
+                style={styles.seeAllRow}
+                onPress={() => router.push('/history')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.seeAllText}>View more →</Text>
+              </TouchableOpacity>
+            </>
           )}
         </View>
 
@@ -599,6 +603,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#7aa3b8',
     fontSize: 13,
+  },
+  placeholderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d4f6230',
+    gap: 14,
+  },
+  placeholderDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2d4f62',
+  },
+  placeholderText: {
+    fontSize: 13,
+    color: '#2d4f62',
+    fontStyle: 'italic',
   },
   seeAllRow: {
     paddingVertical: 12,

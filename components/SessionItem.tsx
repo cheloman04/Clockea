@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Session, SessionObjective } from '../database/types';
-import { formatMinutes, formatTime } from '../utils/time';
+import { formatDate, formatMinutes, formatTime } from '../utils/time';
 
 interface SessionItemProps {
   session: Session;
@@ -39,7 +39,7 @@ export default function SessionItem({ session, hideMember, prominentMember, onAc
         <View style={styles.info}>
           <Text style={styles.project}>{session.project_name}</Text>
           <Text style={styles.time}>
-            {formatTime(session.start_time)}
+            {formatDate(session.start_time)} · {formatTime(session.start_time)}
             {session.end_time ? ` – ${formatTime(session.end_time)}` : ''}
           </Text>
           {!hideMember && prominentMember && session.user_full_name ? (
