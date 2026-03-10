@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -108,31 +108,34 @@ export default function ProfileScreen() {
   async function handleFlush(period: 'day' | 'week' | 'month' | 'all') {
     if (!activeTeamId) return;
     const periodLabel = { day: 'today', week: 'this week', month: 'this month', all: 'ALL TIME' }[period];
-    Alert.alert(
-      'Delete Session Logs',
-      `Are you sure you want to delete all session logs from ${periodLabel}?\n\nThis action cannot be undone.`,
-      [
+    const confirmMsg = `Delete all session logs from ${periodLabel}?\n\nThis cannot be undone.`;
+
+    const doFlush = async () => {
+      try {
+        const { data, error } = await supabase.rpc('admin_flush_sessions', {
+          p_cutoff: getLocalCutoff(period),
+          p_team_id: activeTeamId,
+        });
+        if (error) throw error;
+        const count = data ?? 0;
+        const doneMsg = `${count} session${count !== 1 ? 's' : ''} deleted.`;
+        if (Platform.OS === 'web') window.alert(doneMsg);
+        else Alert.alert('Done', doneMsg);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not delete sessions.';
+        if (Platform.OS === 'web') window.alert(`Error: ${msg}`);
+        else Alert.alert('Error', msg);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMsg)) doFlush();
+    } else {
+      Alert.alert('Delete Session Logs', confirmMsg, [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { data, error } = await supabase.rpc('admin_flush_sessions', {
-                p_cutoff: getLocalCutoff(period),
-                p_team_id: activeTeamId,
-              });
-              if (error) throw error;
-              const count = data ?? 0;
-              Alert.alert('Done', `${count} session${count !== 1 ? 's' : ''} deleted.`);
-            } catch (e) {
-              const msg = e instanceof Error ? e.message : 'Could not delete sessions.';
-              Alert.alert('Error', msg);
-            }
-          },
-        },
-      ]
-    );
+        { text: 'Delete', style: 'destructive', onPress: doFlush },
+      ]);
+    }
   }
 
   async function handleLogout() {
