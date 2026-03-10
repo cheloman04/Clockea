@@ -1,6 +1,6 @@
 # TimeTracker — Project Progress & Context Document
 
-> Last updated: 2026-03-12
+> Last updated: 2026-03-10
 > Purpose: Full context for continuing development across sessions/chats.
 > Audience: Internal tool — personal use only (single user + invited teammates).
 
@@ -196,6 +196,16 @@ interface SessionObjective {
 }
 ```
 
+### `SessionInterval`
+```ts
+interface SessionInterval {
+  id: string;           // UUID
+  session_id: number;
+  start_time: string;
+  end_time: string | null;
+}
+```
+
 ---
 
 ## 5. Supabase Schema
@@ -212,6 +222,7 @@ interface SessionObjective {
 | `projects` | `id`, `name`, `color`, `description`, `team_id`, `user_id`, `client_id`, `status` |
 | `sessions` | `id`, `user_id`, `project_id`, `start_time`, `end_time`, `duration_minutes`, `break_start`, `total_break_seconds`, `notes`, `objective`, `outcome`, `client_id`, `activity_type_id`, `is_billable` |
 | `session_objectives` | `id`, `session_id`, `text`, `completed`, `position`, `created_at` |
+| `session_intervals` | `id`, `session_id`, `start_time`, `end_time` |
 
 ### RLS Policies
 - **clients**: Team members can CRUD via `team_id IN (SELECT team_id FROM team_members WHERE user_id = auth.uid())`
@@ -348,6 +359,8 @@ And `mapSession()` helper to flatten nested join data into flat `Session` fields
 | `toggleObjectiveComplete(objectiveId, completed)` | Own | Mark checklist item done/undone |
 | `getSessionObjectives(sessionId)` | Own | Fetch checklist for one session |
 | `getObjectivesForSessions(sessionIds[])` | Team | Batch-fetch objectives |
+| `resumeSession(sessionId, breakSeconds)` | Own | Reopens closed session; adds gap to `total_break_seconds`; inserts new interval |
+| `getIntervalsForSessions(sessionIds[])` | Own | Batch-fetch work intervals for history display |
 
 ---
 
@@ -439,15 +452,27 @@ Multi-step flow with modes: `combos | client | project | activity | objective | 
 - Admin: rename team, delete team, session log flush
 - Logout
 
+### `session-recap.tsx`
+- Auto-suggests outcome based on checklist completion ratio
+- Read-only checklist card; falls back to legacy `sessions.objective` text
+- **"Continue Session" button** — shown when any objective is incomplete; calculates gap since clock-out, calls `resumeSession`, navigates back to `/working`
+
+### `history.tsx`
+- SectionList grouped by day
+- Batch-fetches objectives + intervals in parallel via `Promise.all`
+- Own sessions show `⋯` → Edit Notes / Delete
+
 ### `SessionItem` component
-- Props: `session`, `hideMember?`, `prominentMember?`, `onActions?`, `objectives?`
+- Props: `session`, `hideMember?`, `prominentMember?`, `onActions?`, `objectives?`, `intervals?`
 - Shows: project name → `client_name · activity_name` (orange) → date/time → member name
-- Expands when session has checklist objectives, legacy objective text, or notes
+- Expands when session has checklist objectives, legacy objective text, notes, or multiple work intervals
+- **"Work Periods" section** — shown only for resumed sessions (intervals.length > 1); lists each period with start–end times
 
 ---
 
 ## 9. Known Issues & TODOs
 
+- [ ] `session_intervals` RLS: add teammate SELECT policy (currently owner-only)
 - [ ] Delete a project
 - [ ] Archive a project (set `status = 'archived'`)
 - [ ] "Leave team" feature in profile
@@ -631,3 +656,47 @@ mySessions + dimension   → donutStats
 
 ### App Name
 - Renamed **Clockea** → **CLOCKEAPP** in all visible UI
+
+---
+
+## 16. Changes — Mar 10, 2026 (Resume Session + Work Intervals)
+
+### New Feature: Resume Session
+Allows users to reopen a completed session when objectives are still incomplete, preserving cumulative work time.
+
+**UX flow:**
+1. Clock Out → `session-recap` shows **"Continue Session"** button (green, bordered) when any objective is unchecked
+2. Tapping it calls `resumeSession(sessionId, breakSeconds)`:
+   - Calculates gap = `Date.now() - endTime` (endTime passed as route param from `working.tsx`)
+   - Adds gap to `sessions.total_break_seconds`
+   - Sets `sessions.end_time = null` (reopens session)
+   - Inserts new row into `session_intervals`
+3. Navigates to `/working` — timer resumes showing cumulative net work time
+
+**Timer accuracy:** `elapsed = (now - start_time) - total_break_seconds` — the gap is counted as break, so display is always correct regardless of how many resumes occur.
+
+### New Supabase Table: `session_intervals`
+```sql
+CREATE TABLE session_intervals (
+  id uuid default gen_random_uuid() primary key,
+  session_id integer not null references sessions(id) on delete cascade,
+  start_time timestamptz not null,
+  end_time timestamptz
+);
+ALTER TABLE session_intervals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "session intervals owner" ON session_intervals
+  USING (session_id IN (SELECT id FROM sessions WHERE user_id = auth.uid()))
+  WITH CHECK (session_id IN (SELECT id FROM sessions WHERE user_id = auth.uid()));
+```
+
+### Storage Changes
+- `clockIn()` — also inserts first interval record after creating session
+- `clockOut()` — after RPC, closes current open interval with `end_time = now()`
+- `resumeSession(sessionId, breakSeconds)` — NEW: reopens session + inserts new interval
+- `getIntervalsForSessions(sessionIds[])` — NEW: batch-fetch for history display
+
+### UI Changes
+- **`session-recap.tsx`**: accepts `endTime` route param; derives `canResume` from incomplete objectives; new "Continue Session" button style
+- **`working.tsx`**: passes `endTime: String(Date.now())` to session-recap route params
+- **`components/SessionItem.tsx`**: new `intervals?` prop; shows **"Work Periods"** section in expanded view when `intervals.length > 1` (only for resumed sessions)
+- **`app/history.tsx`**: batch-loads intervals alongside objectives using `Promise.all`
