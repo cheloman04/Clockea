@@ -4,7 +4,7 @@ import { Alert, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionItem from '../components/SessionItem';
 import Navbar from '../components/Navbar';
-import { deleteSession, getAllSessions, getIntervalsForSessions, getObjectivesForSessions } from '../database/storage';
+import { deleteSession, getAllSessions, getIntervalsForSessions, getObjectivesForSessions, resumeSession } from '../database/storage';
 import { Session, SessionInterval, SessionObjective } from '../database/types';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDate, formatMinutes } from '../utils/time';
@@ -51,8 +51,22 @@ export default function HistoryScreen() {
 
   useFocusEffect(load);
 
+  async function handleResume(session: Session) {
+    try {
+      const breakSeconds = Math.floor((Date.now() - new Date(session.end_time!).getTime()) / 1000);
+      await resumeSession(session.id, breakSeconds);
+      router.replace('/working');
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not resume session.');
+    }
+  }
+
   function handleActions(session: Session) {
     const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [
+      {
+        text: 'Resume Session',
+        onPress: () => handleResume(session),
+      },
       {
         text: 'Edit Notes',
         onPress: () =>

@@ -406,7 +406,7 @@ interface AuthContextType {
 Multi-step flow with modes: `combos | client | project | activity | objective | add-client | add-project | edit-project | add-activity`
 
 **Combos screen (default):**
-- Shows last 5 recent (client, project, activity) combos → tap to instant clock-in
+- Shows last 5 recent (client, project, activity) combos → tap to go to **Objectives step** with project/activity pre-filled
 - "New Session" button → starts full picker
 
 **Full picker flow:**
@@ -460,13 +460,14 @@ Multi-step flow with modes: `combos | client | project | activity | objective | 
 ### `history.tsx`
 - SectionList grouped by day
 - Batch-fetches objectives + intervals in parallel via `Promise.all`
-- Own sessions show `⋯` → Edit Notes / Delete
+- Own sessions show `⋯` → **Resume Session** / Edit Notes / Delete
 
 ### `SessionItem` component
-- Props: `session`, `hideMember?`, `prominentMember?`, `onActions?`, `objectives?`, `intervals?`
+- Props: `session`, `hideMember?`, `prominentMember?`, `onActions?`, `onResume?`, `objectives?`, `intervals?`
 - Shows: project name → `client_name · activity_name` (orange) → date/time → member name
-- Expands when session has checklist objectives, legacy objective text, notes, or multiple work intervals
+- Expands when session has checklist objectives, legacy objective text, notes, multiple work intervals, or `onResume` is provided
 - **"Work Periods" section** — shown only for resumed sessions (intervals.length > 1); lists each period with start–end times
+- **"↩ Resume Session" button** — green bordered button at bottom of expanded section; shown when `onResume` prop is passed
 
 ---
 
@@ -656,6 +657,34 @@ mySessions + dimension   → donutStats
 
 ### App Name
 - Renamed **Clockea** → **CLOCKEAPP** in all visible UI
+
+---
+
+## 17. Changes — Mar 10, 2026 (Resume from Dashboard + History; Combos → Objectives step)
+
+### Resume Session — available everywhere
+Users can now resume any closed session from the **home screen** and **history screen**, not just immediately after clock-out.
+
+**Home screen (`index.tsx`):**
+- Each session row in "Your Sessions" tab is now expandable (even without notes)
+- Expanded view shows green **"↩ Resume Session"** button
+- If already clocked in: shows alert blocking double-session
+- Calculates `breakSeconds = now - session.end_time`, calls `resumeSession()`, navigates to `/working`
+
+**History screen (`history.tsx`):**
+- Tap `⋯` menu on any own session → first option is **"Resume Session"**
+- Same `resumeSession()` + navigate flow
+
+**Both flows preserve:**
+- Cumulative work time (gap counted as `total_break_seconds`)
+- Existing notes, outcome, objectives
+- Work Periods log in history (new interval inserted each resume)
+
+### Clock-in Combos → Objectives step
+**Before:** tapping a recent combo instantly clocked in (skipped objectives)
+**After:** tapping a combo pre-fills project/activity and navigates to the **Objectives** step first
+- User can add tasks, then "Start Session" — or tap "Skip objectives" for instant start (same as before)
+- `handleComboStart` now sets `selectedClient`, `selectedProject`, `selectedActivity` from combo data and sets `mode = 'objective'`
 
 ---
 

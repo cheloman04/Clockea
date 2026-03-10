@@ -9,18 +9,19 @@ interface SessionItemProps {
   hideMember?: boolean;
   prominentMember?: boolean;
   onActions?: () => void;
+  onResume?: () => void;
   objectives?: SessionObjective[];
   intervals?: SessionInterval[];
 }
 
-function SessionItem({ session, hideMember, prominentMember, onActions, objectives, intervals }: SessionItemProps) {
+function SessionItem({ session, hideMember, prominentMember, onActions, onResume, objectives, intervals }: SessionItemProps) {
   const [expanded, setExpanded] = useState(false);
 
   const hasNotes     = !!session.notes?.trim();
   const hasObjective = !!session.objective?.trim();
   const hasChecklist = !!objectives && objectives.length > 0;
   const hasIntervals = !!intervals && intervals.length > 1; // only show log when session was resumed
-  const hasExpanded  = hasNotes || hasObjective || hasChecklist || hasIntervals;
+  const hasExpanded  = hasNotes || hasObjective || hasChecklist || hasIntervals || !!onResume;
 
   return (
     <View style={styles.wrapper}>
@@ -133,6 +134,13 @@ function SessionItem({ session, hideMember, prominentMember, onActions, objectiv
               <Text style={styles.sectionLabel}>Session Notes</Text>
               <Text style={styles.sectionText}>{session.notes}</Text>
             </View>
+          )}
+
+          {/* Resume button */}
+          {onResume && (
+            <TouchableOpacity style={styles.resumeBtn} onPress={onResume} activeOpacity={0.8}>
+              <Text style={styles.resumeBtnText}>↩ Resume Session</Text>
+            </TouchableOpacity>
           )}
         </View>
       )}
@@ -306,6 +314,20 @@ const styles = StyleSheet.create({
   },
   intervalIndex: {
     color: '#4a6d80',
+    fontWeight: '700',
+  },
+  resumeBtn: {
+    marginTop: 4,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#4ade80',
+    alignItems: 'center',
+    backgroundColor: '#1e4d3820',
+  },
+  resumeBtnText: {
+    color: '#4ade80',
+    fontSize: 13,
     fontWeight: '700',
   },
 });

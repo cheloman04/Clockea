@@ -1,7 +1,9 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,6 +18,7 @@ import {
   getActiveSessions,
   getTodaySessions,
   getTodayTotalMinutes,
+  resumeSession,
 } from '../database/storage';
 import { Session } from '../database/types';
 import { useAuth } from '../contexts/AuthContext';
@@ -99,6 +102,29 @@ export default function HomeScreen() {
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [activeSession]);
+
+  async function handleResume(session: Session) {
+    if (activeSession) {
+      if (Platform.OS === 'web') {
+        window.alert('You already have an active session. Clock out first.');
+      } else {
+        Alert.alert('Active Session', 'You already have an active session. Clock out first.');
+      }
+      return;
+    }
+    try {
+      const breakSeconds = Math.floor((Date.now() - new Date(session.end_time!).getTime()) / 1000);
+      await resumeSession(session.id, breakSeconds);
+      router.push('/working');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not resume session.';
+      if (Platform.OS === 'web') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Error', msg);
+      }
+    }
+  }
 
   function handleClockPress() {
     Animated.sequence([
@@ -300,7 +326,12 @@ export default function HomeScreen() {
               {Array.from({ length: 4 }, (_, i) => {
                 const item = mySessions[i];
                 return item ? (
-                  <SessionItem key={item.id} session={item} hideMember />
+                  <SessionItem
+                    key={item.id}
+                    session={item}
+                    hideMember
+                    onResume={item.end_time ? () => handleResume(item) : undefined}
+                  />
                 ) : (
                   <View key={`my-empty-${i}`} style={styles.placeholderRow}>
                     <View style={styles.placeholderDot} />

@@ -124,18 +124,14 @@ export default function ClockInScreen() {
 
   // ── Quick start from combo ──────────────────────────────────────────────────
 
-  async function handleComboStart(combo: RecentCombo) {
-    try {
-      playClockInSound();
-      const sessionId = await clockIn(combo.project_id, combo.activity_type_id, {
-        clientId: combo.client_id,
-        isBillable: true,
-      });
-      await createSessionObjectives(sessionId, []);
-      router.replace('/working');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start session.');
-    }
+  function handleComboStart(combo: RecentCombo) {
+    setSelectedClient({ id: combo.client_id, name: combo.client_name, team_id: '', is_internal: false, created_at: '' });
+    setSelectedProject({ id: combo.project_id, name: combo.project_name, color: combo.project_color, status: 'active' });
+    setSelectedActivity({ id: combo.activity_type_id, name: combo.activity_name, color: combo.activity_color, team_id: '' });
+    setIsBillable(true);
+    setItems([]);
+    setInputText('');
+    setMode('objective');
   }
 
   // ── Start session (from objective step) ────────────────────────────────────
