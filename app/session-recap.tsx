@@ -11,13 +11,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getSessionObjectives, saveSessionNotes, saveSessionOutcome } from '../database/storage';
+import { getSessionObjectives, resumeSession, saveSessionNotes, saveSessionOutcome } from '../database/storage';
 import { SessionObjective } from '../database/types';
 import { Outcome, OUTCOMES } from '../utils/outcomes';
 
 export default function SessionRecapScreen() {
   const router = useRouter();
-  const { sessionId, objective } = useLocalSearchParams<{ sessionId: string; objective?: string }>();
+  const { sessionId, objective, endTime } = useLocalSearchParams<{ sessionId: string; objective?: string; endTime?: string }>();
   const [notes, setNotes] = useState('');
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [error, setError] = useState('');
@@ -25,8 +25,9 @@ export default function SessionRecapScreen() {
 
   const hasLegacyObjective = !!objective?.trim();
   const hasObjectives = objectives.length > 0;
-  // Show outcome picker if either checklist items or legacy objective text exists
   const showOutcomePicker = hasObjectives || hasLegacyObjective;
+  const hasIncomplete = objectives.some((o) => !o.completed);
+  const canResume = hasIncomplete && !!endTime;
 
   useEffect(() => {
     if (!sessionId) return;
@@ -61,6 +62,18 @@ export default function SessionRecapScreen() {
 
   function handleSkip() {
     router.replace('/');
+  }
+
+  async function handleResume() {
+    try {
+      setError('');
+      if (!sessionId || !endTime) return;
+      const breakSeconds = Math.floor((Date.now() - Number(endTime)) / 1000);
+      await resumeSession(Number(sessionId), breakSeconds);
+      router.replace('/working');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not resume session.');
+    }
   }
 
   const canSave = !showOutcomePicker || outcome !== null;
@@ -178,6 +191,16 @@ export default function SessionRecapScreen() {
 
         {/* Fixed actions */}
         <View style={styles.actions}>
+          {canResume && (
+            <TouchableOpacity
+              style={styles.resumeBtn}
+              onPress={handleResume}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.resumeBtnText}>Continue Session</Text>
+              <Text style={styles.resumeBtnSub}>Keep going on incomplete objectives</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
             onPress={handleSave}
@@ -441,6 +464,24 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 32,
     gap: 12,
+  },
+  resumeBtn: {
+    backgroundColor: '#1e4d38',
+    borderWidth: 1.5,
+    borderColor: '#4ade80',
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  resumeBtnText: {
+    color: '#4ade80',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  resumeBtnSub: {
+    color: '#4ade8099',
+    fontSize: 12,
+    marginTop: 3,
   },
   saveBtn: {
     backgroundColor: '#fe7f2d',

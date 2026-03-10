@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Session, SessionObjective } from '../database/types';
+import { Session, SessionInterval, SessionObjective } from '../database/types';
 import { formatDate, formatMinutes, formatTime } from '../utils/time';
 import { OUTCOME_CONFIG } from '../utils/outcomes';
 
@@ -10,15 +10,17 @@ interface SessionItemProps {
   prominentMember?: boolean;
   onActions?: () => void;
   objectives?: SessionObjective[];
+  intervals?: SessionInterval[];
 }
 
-function SessionItem({ session, hideMember, prominentMember, onActions, objectives }: SessionItemProps) {
+function SessionItem({ session, hideMember, prominentMember, onActions, objectives, intervals }: SessionItemProps) {
   const [expanded, setExpanded] = useState(false);
 
   const hasNotes     = !!session.notes?.trim();
   const hasObjective = !!session.objective?.trim();
   const hasChecklist = !!objectives && objectives.length > 0;
-  const hasExpanded  = hasNotes || hasObjective || hasChecklist;
+  const hasIntervals = !!intervals && intervals.length > 1; // only show log when session was resumed
+  const hasExpanded  = hasNotes || hasObjective || hasChecklist || hasIntervals;
 
   return (
     <View style={styles.wrapper}>
@@ -105,6 +107,23 @@ function SessionItem({ session, hideMember, prominentMember, onActions, objectiv
               <Text style={[styles.outcomeBadge, { color: OUTCOME_CONFIG[session.outcome].color }]}>
                 {OUTCOME_CONFIG[session.outcome].label}
               </Text>
+            </View>
+          )}
+
+          {/* Date log (multiple work periods) */}
+          {hasIntervals && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Work Periods</Text>
+              {intervals!.map((iv, i) => (
+                <View key={iv.id} style={styles.intervalRow}>
+                  <View style={styles.intervalDot} />
+                  <Text style={styles.intervalText}>
+                    <Text style={styles.intervalIndex}>#{i + 1}  </Text>
+                    {formatDate(iv.start_time)}  {formatTime(iv.start_time)}
+                    {iv.end_time ? ` – ${formatTime(iv.end_time)}` : '  · ongoing'}
+                  </Text>
+                </View>
+              ))}
             </View>
           )}
 
@@ -264,5 +283,29 @@ const styles = StyleSheet.create({
   },
   checkTextMissed: {
     color: '#4a6d80',
+  },
+
+  // Work periods / interval log
+  intervalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 5,
+  },
+  intervalDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#4a6d80',
+    flexShrink: 0,
+  },
+  intervalText: {
+    fontSize: 12,
+    color: '#7aa3b8',
+    lineHeight: 17,
+  },
+  intervalIndex: {
+    color: '#4a6d80',
+    fontWeight: '700',
   },
 });

@@ -75,3 +75,10 @@ export interface SessionObjective {
   position: number;
   created_at: string;
 }
+
+export interface SessionInterval {
+  id: string;
+  session_id: number;
+  start_time: string;
+  end_time: string | null;
+}

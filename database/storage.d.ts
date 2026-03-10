@@ -1,4 +1,4 @@
-import { ActivityType, Client, Project, RecentCombo, Session, SessionObjective } from './types';
+import { ActivityType, Client, Project, RecentCombo, Session, SessionInterval, SessionObjective } from './types';
 
 export function initDb(): Promise<void>;
 
@@ -26,6 +26,7 @@ export function clockIn(
   opts?: { clientId?: string; isBillable?: boolean; objective?: string }
 ): Promise<number>;
 export function clockOut(sessionId: number): Promise<void>;
+export function resumeSession(sessionId: number, breakSeconds: number): Promise<void>;
 export function startBreak(sessionId: number): Promise<void>;
 export function endBreak(sessionId: number): Promise<void>;
 export function getTodaySessions(): Promise<Session[]>;
@@ -42,3 +43,4 @@ export function createSessionObjectives(sessionId: number, texts: string[]): Pro
 export function toggleObjectiveComplete(objectiveId: string, completed: boolean): Promise<void>;
 export function getSessionObjectives(sessionId: number): Promise<SessionObjective[]>;
 export function getObjectivesForSessions(sessionIds: number[]): Promise<Record<number, SessionObjective[]>>;
+export function getIntervalsForSessions(sessionIds: number[]): Promise<Record<number, SessionInterval[]>>;

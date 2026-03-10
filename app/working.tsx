@@ -119,6 +119,7 @@ export default function WorkingScreen() {
             params: {
               sessionId: String(session.id),
               objective: session.objective ?? '',
+              endTime: String(Date.now()),
             },
           });
         } catch (e) {

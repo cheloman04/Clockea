@@ -4,8 +4,8 @@ import { Alert, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionItem from '../components/SessionItem';
 import Navbar from '../components/Navbar';
-import { deleteSession, getAllSessions, getObjectivesForSessions } from '../database/storage';
-import { Session, SessionObjective } from '../database/types';
+import { deleteSession, getAllSessions, getIntervalsForSessions, getObjectivesForSessions } from '../database/storage';
+import { Session, SessionInterval, SessionObjective } from '../database/types';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDate, formatMinutes } from '../utils/time';
 
@@ -34,12 +34,18 @@ export default function HistoryScreen() {
   const { user } = useAuth();
   const [sections, setSections] = useState<DaySection[]>([]);
   const [objectivesMap, setObjectivesMap] = useState<Record<number, SessionObjective[]>>({});
+  const [intervalsMap, setIntervalsMap] = useState<Record<number, SessionInterval[]>>({});
 
   const load = useCallback(() => {
     getAllSessions().then(async (sessions) => {
       setSections(groupByDay(sessions));
-      const map = await getObjectivesForSessions(sessions.map((s) => s.id));
-      setObjectivesMap(map);
+      const ids = sessions.map((s) => s.id);
+      const [objMap, ivMap] = await Promise.all([
+        getObjectivesForSessions(ids),
+        getIntervalsForSessions(ids),
+      ]);
+      setObjectivesMap(objMap);
+      setIntervalsMap(ivMap);
     });
   }, []);
 
@@ -98,6 +104,7 @@ export default function HistoryScreen() {
           <SessionItem
             session={item}
             objectives={objectivesMap[item.id]}
+            intervals={intervalsMap[item.id]}
             onActions={item.user_id === user?.id ? () => handleActions(item) : undefined}
           />
         )}

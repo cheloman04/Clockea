@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { ActivityType, Client, Project, RecentCombo, Session, SessionObjective } from './types';
+import { ActivityType, Client, Project, RecentCombo, Session, SessionInterval, SessionObjective } from './types';
 
 function ensureNoError(error: { message: string } | null) {
   if (error) throw new Error(error.message);
@@ -207,12 +207,43 @@ export async function clockIn(
     .single();
   ensureNoError(error);
   if (!data) throw new Error('Could not start session.');
+  // Track first work interval
+  await supabase.from('session_intervals').insert({ session_id: data.id, start_time: new Date().toISOString() });
   return data.id;
 }
 
 export async function clockOut(sessionId: number): Promise<void> {
   const { error } = await supabase.rpc('clock_out_session', { p_session_id: sessionId });
   if (error) throw new Error(error.message);
+  // Close current open interval
+  await supabase
+    .from('session_intervals')
+    .update({ end_time: new Date().toISOString() })
+    .eq('session_id', sessionId)
+    .is('end_time', null);
+}
+
+export async function resumeSession(sessionId: number, breakSeconds: number): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+  const { data: sess } = await supabase
+    .from('sessions')
+    .select('total_break_seconds')
+    .eq('id', sessionId)
+    .single();
+  const { error } = await supabase
+    .from('sessions')
+    .update({
+      end_time: null,
+      total_break_seconds: (sess?.total_break_seconds ?? 0) + breakSeconds,
+    })
+    .eq('id', sessionId)
+    .eq('user_id', user.id);
+  ensureNoError(error);
+  const { error: intervalError } = await supabase
+    .from('session_intervals')
+    .insert({ session_id: sessionId, start_time: new Date().toISOString() });
+  ensureNoError(intervalError);
 }
 
 export async function startBreak(sessionId: number): Promise<void> {
@@ -414,6 +445,22 @@ export async function getObjectivesForSessions(sessionIds: number[]): Promise<Re
   for (const obj of data as SessionObjective[]) {
     if (!result[obj.session_id]) result[obj.session_id] = [];
     result[obj.session_id].push(obj);
+  }
+  return result;
+}
+
+export async function getIntervalsForSessions(sessionIds: number[]): Promise<Record<number, SessionInterval[]>> {
+  if (sessionIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('session_intervals')
+    .select('*')
+    .in('session_id', sessionIds)
+    .order('start_time', { ascending: true });
+  if (error || !data) return {};
+  const result: Record<number, SessionInterval[]> = {};
+  for (const iv of data as SessionInterval[]) {
+    if (!result[iv.session_id]) result[iv.session_id] = [];
+    result[iv.session_id].push(iv);
   }
   return result;
 }
