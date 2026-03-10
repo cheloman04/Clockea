@@ -8,7 +8,7 @@
 
 ## 1. Project Overview
 
-**TimeTracker** (Clockea) is a cross-platform time-tracking app with team collaboration, built with:
+**TimeTracker** (CLOCKEAPP) is a cross-platform time-tracking app with team collaboration, built with:
 - **Expo SDK 54** (`expo@54.0.33`)
 - **React Native 0.81.5**
 - **React 19.1.0**
@@ -59,37 +59,37 @@ The app runs primarily on **web** (`npx expo start --web` → `localhost:8081`) 
 ```
 TimeTracker/
 ├── app/
-│   ├── _layout.tsx          # Stack navigator + auth guard + CLOCKEA logo + profile icon in header
+│   ├── _layout.tsx          # Stack navigator + auth guard; headerShown: false on main screens
 │   ├── index.tsx            # Home: context-aware hero, Live Now, tabs (Your/Team Sessions), fixed bottom bar
 │   ├── login.tsx            # "TURN TIME INTO PROGRESS." + clock illustration
 │   ├── register.tsx         # Sign-up + optional team code (stored in user_metadata)
-│   ├── clock-in.tsx         # Project selector → checklist builder → session start
-│   ├── working.tsx          # Active session: ← Dashboard, timer, checklist toggle, Take a Break, Clock Out
+│   ├── clock-in.tsx         # Multi-step picker: combos → client → project → activity → objectives
+│   ├── working.tsx          # Active session: timer, checklist toggle, Take a Break, Clock Out
 │   ├── session-recap.tsx    # Post-session: checklist review + auto-suggested outcome + notes
 │   ├── edit-session.tsx     # Edit notes on a completed session (from history)
 │   ├── history.tsx          # All team sessions grouped by day; objectives loaded per session
-│   ├── stats.tsx            # Analytics: vertical donut charts (My + Team Sessions) + fixed bottom bar
-│   ├── profile.tsx          # User info + team switcher + members list + join/create team + logout
+│   ├── stats.tsx            # Analytics: donut charts + by-client + by-activity horizontal bars
+│   ├── profile.tsx          # User info + team switcher + members + clients + activity types + logout
 │   └── create-team.tsx      # Create a new team and get its code
 ├── components/
 │   ├── Timer.tsx            # Displays net work time (excludes breaks)
 │   ├── ProjectCard.tsx      # Project row with colored accent + edit button
-│   ├── SessionItem.tsx      # Session row with expand: checklist (✔/✘) → outcome badge → notes
-│   │                          Props: hideMember?, prominentMember?, onActions?, objectives?
+│   ├── SessionItem.tsx      # Session row: project + client · activity meta + expand: checklist → outcome → notes
 │   ├── Navbar.tsx           # Responsive navbar: desktop 3-col / mobile hamburger dropdown
 │   ├── TickingClock.tsx     # Animated overlay on session start (2.5s fade-out)
 │   └── MilestoneConfetti.tsx # 8-particle burst at 60-min milestone (fires once per session)
 ├── contexts/
 │   └── AuthContext.tsx      # Auth + multi-team state; syncs profiles.full_name on login
 ├── database/
-│   ├── types.ts             # Team, Project, Session, SessionObjective interfaces
+│   ├── types.ts             # Team, Client, ActivityType, RecentCombo, Project, Session, SessionObjective
 │   ├── storage.d.ts         # TypeScript declarations for platform storage modules
 │   ├── storage.web.ts       # Supabase implementation (team-scoped queries)
 │   └── storage.native.ts    # Identical to storage.web.ts (both use Supabase)
 ├── lib/
 │   └── supabase.ts          # Supabase client (URL + anon key)
 ├── utils/
-│   └── time.ts              # formatDuration, formatMinutes, formatTime, formatDate, getElapsedSeconds
+│   ├── time.ts              # formatDuration, formatMinutes, formatTime, formatDate, getElapsedSeconds
+│   └── sounds.ts            # Web Audio API: playClockInSound(), playClockOutSound()
 └── docs/
     └── PROJECT_PROGRESS.md  # This file
 ```
@@ -108,6 +108,42 @@ interface Team {
 }
 ```
 
+### `Client`
+```ts
+interface Client {
+  id: string;           // UUID
+  name: string;
+  team_id: string;      // UUID
+  is_internal: boolean;
+  created_by?: string;
+  created_at: string;
+}
+```
+
+### `ActivityType`
+```ts
+interface ActivityType {
+  id: string;           // UUID
+  name: string;
+  color: string;
+  team_id: string;
+}
+```
+
+### `RecentCombo`
+```ts
+interface RecentCombo {
+  client_id: string;
+  project_id: number;
+  activity_type_id: string;
+  client_name: string;
+  project_name: string;
+  project_color: string;
+  activity_name: string;
+  activity_color: string;
+}
+```
+
 ### `Project`
 ```ts
 interface Project {
@@ -115,7 +151,10 @@ interface Project {
   name: string;
   color: string;
   description?: string;
-  team_id?: string;     // UUID — which team owns this project
+  team_id?: string;
+  client_id?: string;       // FK → clients.id
+  client_name?: string;     // denormalized for display
+  status: 'active' | 'archived';
 }
 ```
 
@@ -123,19 +162,25 @@ interface Project {
 ```ts
 interface Session {
   id: number;
-  user_id: string;              // UUID — who worked
+  user_id: string;
   project_id: number;
-  start_time: string;           // ISO string
-  end_time: string | null;      // null = active session
-  duration_minutes: number | null; // net work time (excl. breaks) — computed by DB trigger
-  break_start: string | null;   // ISO string when current break started
-  total_break_seconds: number;  // accumulated past break time
-  notes?: string;               // post-session recap note
-  objective?: string;           // legacy single-text objective (backward compat)
+  start_time: string;
+  end_time: string | null;
+  duration_minutes: number | null;
+  break_start: string | null;
+  total_break_seconds: number;
+  notes?: string;
+  objective?: string;           // legacy single-text (backward compat)
   outcome?: 'achieved' | 'partial' | 'missed';
-  project_name?: string;        // joined from projects
-  project_color?: string;       // joined from projects
-  user_full_name?: string;      // joined from profiles (teammate visibility)
+  is_billable: boolean;
+  // denormalized for display
+  project_name?: string;
+  project_color?: string;
+  user_full_name?: string;
+  client_id?: string;
+  client_name?: string;
+  activity_type_id?: string;
+  activity_name?: string;
 }
 ```
 
@@ -143,10 +188,10 @@ interface Session {
 ```ts
 interface SessionObjective {
   id: string;           // UUID
-  session_id: number;   // FK → sessions.id ON DELETE CASCADE
+  session_id: number;
   text: string;
   completed: boolean;
-  position: number;     // display order
+  position: number;
   created_at: string;
 }
 ```
@@ -159,149 +204,150 @@ interface SessionObjective {
 | Table | Key Columns |
 |---|---|
 | `auth.users` | Supabase managed |
-| `profiles` | `id` (= auth.users.id), `full_name`, `team_id` (legacy), `active_team_id` |
+| `profiles` | `id`, `full_name`, `team_id` (legacy), `active_team_id` |
 | `teams` | `id`, `name`, `code`, `created_by` |
-| `team_members` | `user_id`, `team_id`, `joined_at` — **N:N relationship** |
-| `projects` | `id`, `name`, `color`, `description`, `team_id`, `user_id` |
-| `sessions` | `id`, `user_id`, `project_id`, `start_time`, `end_time`, `duration_minutes`, `break_start`, `total_break_seconds`, `notes`, `objective` (legacy), `outcome` |
+| `team_members` | `user_id`, `team_id`, `joined_at` |
+| `clients` | `id`, `name`, `team_id`, `is_internal`, `created_by`, `created_at` |
+| `activity_types` | `id`, `name`, `color`, `team_id`, `created_at` |
+| `projects` | `id`, `name`, `color`, `description`, `team_id`, `user_id`, `client_id`, `status` |
+| `sessions` | `id`, `user_id`, `project_id`, `start_time`, `end_time`, `duration_minutes`, `break_start`, `total_break_seconds`, `notes`, `objective`, `outcome`, `client_id`, `activity_type_id`, `is_billable` |
 | `session_objectives` | `id`, `session_id`, `text`, `completed`, `position`, `created_at` |
 
 ### RLS Policies
-- **team_members**: SELECT + INSERT for own `user_id`; DELETE for own row OR team admin
-- **projects**: SELECT/INSERT for team members; UPDATE for team members (via `team_members` join)
-- **sessions**: own sessions full CRUD; teammates' sessions SELECT if project is in shared team
-- **session_objectives**: owner (via session) full CRUD; teammates SELECT
-- **profiles**: own profile always; teammates' profiles SELECT via `get_teammate_ids()` security definer function
+- **clients**: Team members can CRUD via `team_id IN (SELECT team_id FROM team_members WHERE user_id = auth.uid())`
+- **activity_types**: Same as clients
+- **projects**: SELECT/INSERT for team members; UPDATE for team members
+- **sessions**: own sessions full CRUD; teammates' sessions SELECT if project in shared team
+- **session_objectives**: owner full CRUD; teammates SELECT
+- **profiles**: own profile always; teammates' profiles SELECT via `get_teammate_ids()` security definer
 
 ### Security Definer Functions
 ```sql
--- Returns all user_ids in teams shared with p_user_id (bypasses team_members RLS)
+-- Returns all user_ids in teams shared with p_user_id
 CREATE OR REPLACE FUNCTION get_teammate_ids(p_user_id uuid)
-RETURNS SETOF uuid
-LANGUAGE sql SECURITY DEFINER SET search_path = public
+RETURNS SETOF uuid LANGUAGE sql SECURITY DEFINER SET search_path = public
 AS $$
   SELECT DISTINCT user_id FROM team_members
   WHERE team_id IN (SELECT team_id FROM team_members WHERE user_id = p_user_id);
 $$;
 
--- Server-side clock out: sets end_time = NOW(), finalises breaks, triggers duration calc
+-- Server-side clock out
 CREATE OR REPLACE FUNCTION clock_out_session(p_session_id bigint)
-RETURNS void
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
-AS $$
-DECLARE
-  v_break_start        timestamptz;
-  v_total_break_secs   int;
-BEGIN
-  SELECT break_start, total_break_seconds
-    INTO v_break_start, v_total_break_secs
-    FROM sessions WHERE id = p_session_id AND user_id = auth.uid();
-  IF NOT FOUND THEN RAISE EXCEPTION 'Session not found or unauthorized'; END IF;
-  IF v_break_start IS NOT NULL THEN
-    v_total_break_secs := COALESCE(v_total_break_secs, 0)
-      + EXTRACT(EPOCH FROM (NOW() - v_break_start))::int;
-  END IF;
-  UPDATE sessions
-     SET end_time = NOW(), break_start = NULL, total_break_seconds = v_total_break_secs
-   WHERE id = p_session_id AND user_id = auth.uid();
-END;
-$$;
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$ ... $$;
+
+-- Admin flush sessions
+CREATE OR REPLACE FUNCTION admin_flush_sessions(p_cutoff TIMESTAMPTZ, p_team_id UUID)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$ ... $$;
 ```
 
-### Full SQL applied to Supabase (cumulative)
+### Full SQL Migration (cumulative — run in order)
+
+**Step 1 — Original schema** (sessions objective/outcome, triggers, RLS, session_objectives):
+See previous versions of this doc.
+
+**Step 2 — Client → Activity hierarchy (Mar 11, 2026):**
 ```sql
--- sessions: objective + outcome columns
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS objective TEXT;
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS outcome  TEXT;
-ALTER TABLE sessions ADD CONSTRAINT sessions_outcome_check
-  CHECK (outcome IS NULL OR outcome IN ('achieved', 'partial', 'missed'));
-
--- Server-side duration trigger
-CREATE OR REPLACE FUNCTION compute_session_duration()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
-BEGIN
-  IF NEW.end_time IS NOT NULL AND OLD.end_time IS NULL THEN
-    NEW.duration_minutes := GREATEST(0,
-      EXTRACT(EPOCH FROM (NEW.end_time::timestamptz - NEW.start_time::timestamptz)) / 60.0
-      - COALESCE(NEW.total_break_seconds, 0) / 60.0);
-  END IF;
-  RETURN NEW;
-END;
-$$;
-DROP TRIGGER IF EXISTS trg_session_duration ON sessions;
-CREATE TRIGGER trg_session_duration
-  BEFORE UPDATE ON sessions FOR EACH ROW EXECUTE FUNCTION compute_session_duration();
-
--- RLS: sessions UPDATE + DELETE
-DROP POLICY IF EXISTS "Users can update own sessions" ON sessions;
-CREATE POLICY "Users can update own sessions" ON sessions FOR UPDATE
-  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
-DROP POLICY IF EXISTS "Users can delete own sessions" ON sessions;
-CREATE POLICY "Users can delete own sessions" ON sessions FOR DELETE
-  USING (user_id = auth.uid());
-
--- RLS: projects UPDATE
-DROP POLICY IF EXISTS "Team members can update team projects" ON projects;
-CREATE POLICY "Team members can update team projects" ON projects FOR UPDATE
-  USING  (team_id IN (SELECT team_id FROM team_members WHERE user_id = auth.uid()))
-  WITH CHECK (team_id IN (SELECT team_id FROM team_members WHERE user_id = auth.uid()));
-
--- RLS: team_members DELETE
-DROP POLICY IF EXISTS "Admins can remove team members" ON team_members;
-CREATE POLICY "Admins can remove team members" ON team_members FOR DELETE
-  USING (user_id = auth.uid()
-    OR team_id IN (SELECT id FROM teams WHERE created_by = auth.uid()));
-
--- session_objectives table + RLS
-CREATE TABLE session_objectives (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id bigint NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  text text NOT NULL,
-  completed boolean NOT NULL DEFAULT false,
-  position smallint NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
+-- clients table
+CREATE TABLE clients (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL,
+  team_id    uuid NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  is_internal boolean NOT NULL DEFAULT false,
+  created_by uuid REFERENCES auth.users(id),
+  created_at timestamptz DEFAULT now()
 );
-ALTER TABLE session_objectives ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "owner_all" ON session_objectives FOR ALL
-  USING (EXISTS (SELECT 1 FROM sessions WHERE sessions.id = session_objectives.session_id AND sessions.user_id = auth.uid()))
-  WITH CHECK (EXISTS (SELECT 1 FROM sessions WHERE sessions.id = session_objectives.session_id AND sessions.user_id = auth.uid()));
-CREATE POLICY "teammate_select" ON session_objectives FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM sessions s
-    JOIN team_members tm ON tm.team_id = (SELECT active_team_id FROM profiles WHERE id = auth.uid())
-    WHERE s.id = session_objectives.session_id AND s.user_id = tm.user_id
-  ));
+ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Team members can CRUD clients" ON clients FOR ALL
+  USING (team_id IN (SELECT team_id FROM team_members WHERE user_id = auth.uid()));
+
+-- activity_types table
+CREATE TABLE activity_types (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL,
+  color      text NOT NULL DEFAULT '#7aa3b8',
+  team_id    uuid NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE activity_types ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Team members can CRUD activity_types" ON activity_types FOR ALL
+  USING (team_id IN (SELECT team_id FROM team_members WHERE user_id = auth.uid()));
+
+-- projects: add client_id + status
+ALTER TABLE projects
+  ADD COLUMN client_id uuid REFERENCES clients(id),
+  ADD COLUMN status text NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'archived'));
+
+-- sessions: add client/activity/billable columns
+ALTER TABLE sessions
+  ADD COLUMN client_id uuid REFERENCES clients(id),
+  ADD COLUMN activity_type_id uuid REFERENCES activity_types(id),
+  ADD COLUMN is_billable boolean NOT NULL DEFAULT true;
+
+-- Seed existing teams (run once)
+DO $$
+DECLARE
+  r RECORD;
+  v_client_id uuid;
+BEGIN
+  FOR r IN SELECT id FROM teams LOOP
+    INSERT INTO clients (name, team_id, is_internal, created_at)
+    VALUES ('General', r.id, false, now()) RETURNING id INTO v_client_id;
+    INSERT INTO clients (name, team_id, is_internal, created_at)
+    VALUES ('Internal', r.id, true, now());
+    UPDATE projects SET client_id = v_client_id
+    WHERE team_id = r.id AND client_id IS NULL;
+    INSERT INTO activity_types (name, color, team_id) VALUES
+      ('Development', '#60a5fa', r.id), ('Debugging', '#f87171', r.id),
+      ('Design', '#c084fc', r.id), ('Research', '#fbbf24', r.id),
+      ('Planning', '#4ade80', r.id), ('Meeting', '#fe7f2d', r.id),
+      ('Automation', '#34d399', r.id), ('Marketing', '#fb923c', r.id);
+  END LOOP;
+END $$;
 ```
 
 ---
 
 ## 6. Storage Functions
 
-Both `storage.web.ts` and `storage.native.ts` export the same Supabase-backed API:
+Both `storage.web.ts` and `storage.native.ts` export the same Supabase-backed API.
+
+All session queries use `SESSION_SELECT` constant:
+```
+'*, projects!project_id(name, color), clients!client_id(name), activity_types!activity_type_id(name, color)'
+```
+And `mapSession()` helper to flatten nested join data into flat `Session` fields.
 
 | Function | Scope | Description |
 |---|---|---|
 | `initDb()` | — | No-op |
-| `getProjects()` | Team | Projects for `active_team_id` |
-| `createProject(name, color, description?)` | Team | Insert with `team_id`, `user_id` |
+| `getClients()` | Team | All clients for active team, ordered by name |
+| `createClient(name, isInternal?)` | Team | Insert client with team_id |
+| `getActivityTypes()` | Team | All activity types for active team, ordered by name |
+| `createActivityType(name, color?)` | Team | Insert activity type |
+| `getRecentCombos()` | Own | Last 5 unique (client, project, activity) combos from user's sessions |
+| `getProjects(clientId?)` | Team | Active projects, optionally filtered by client; joins client_name |
+| `createProject(name, color, description?, clientId?)` | Team | Insert with team_id, user_id, client_id |
 | `updateProject(id, name, color, description)` | Team | Edit any team project |
 | `getActiveSession()` | Own | Session with `end_time = null` for current user |
-| `clockIn(projectId, objective?)` | Own | Start a new session (objective param kept for legacy; new sessions use `createSessionObjectives`) |
-| `clockOut(sessionId)` | Own | Calls `clock_out_session` RPC — server sets `end_time = NOW()`, trigger computes `duration_minutes` |
+| `clockIn(projectId, activityTypeId?, opts?)` | Own | Start session with client_id, activity_type_id, is_billable |
+| `clockOut(sessionId)` | Own | Calls `clock_out_session` RPC |
 | `startBreak(sessionId)` | Own | Set `break_start = now()` |
 | `endBreak(sessionId)` | Own | Accumulate break time, clear `break_start` |
 | `saveSessionNotes(sessionId, notes)` | Own | Save recap note |
-| `saveSessionOutcome(sessionId, outcome)` | Own | Save outcome; enforces `user_id` ownership |
+| `saveSessionOutcome(sessionId, outcome)` | Own | Save outcome |
 | `deleteSession(sessionId)` | Own | Delete own session |
-| `getTodaySessions()` | Team | All teammates' sessions today, enriched with `user_full_name` |
-| `getAllSessions()` | Team | All completed sessions for team, enriched with `user_full_name` |
+| `getTodaySessions()` | Team | Today's completed sessions, enriched with user_full_name |
+| `getAllSessions()` | Team | All completed sessions for team |
 | `getTodayTotalMinutes()` | Own | Personal total minutes today |
 | `getSessionsInRange(from, to)` | Team | Team sessions in date range |
-| `getActiveSessions()` | Team | Active sessions for entire team (Live Now feature) |
-| `createSessionObjectives(sessionId, texts[])` | Own | Bulk-insert checklist items for a session |
-| `toggleObjectiveComplete(objectiveId, completed)` | Own | Mark a checklist item done/undone |
-| `getSessionObjectives(sessionId)` | Own | Fetch checklist items for one session (ordered by position) |
-| `getObjectivesForSessions(sessionIds[])` | Team | Batch-fetch objectives for many sessions → `Record<sessionId, SessionObjective[]>` |
+| `getActiveSessions()` | Team | Active sessions for entire team (Live Now) |
+| `createSessionObjectives(sessionId, texts[])` | Own | Bulk-insert checklist items |
+| `toggleObjectiveComplete(objectiveId, completed)` | Own | Mark checklist item done/undone |
+| `getSessionObjectives(sessionId)` | Own | Fetch checklist for one session |
+| `getObjectivesForSessions(sessionIds[])` | Team | Batch-fetch objectives |
 
 ---
 
@@ -323,10 +369,10 @@ interface AuthContextType {
 
 ### `loadTeamsForUser` logic (runs on every login)
 1. Fetches `profiles.team_id` (legacy) + `profiles.active_team_id` + `profiles.full_name`
-2. **Syncs full_name**: if `profiles.full_name` null but `user_metadata.full_name` exists → writes to profiles
+2. **Syncs full_name**: if null but `user_metadata.full_name` exists → writes to profiles
 3. Fetches all `team_members` rows joined with `teams`
-4. **Auto-join pending**: if no teams and `user_metadata.pending_team_code` exists → insert into `team_members`
-5. **Auto-migrate legacy**: if no teams and `profiles.team_id` exists → insert into `team_members`
+4. **Auto-join pending**: if no teams and `user_metadata.pending_team_code` → insert into `team_members`
+5. **Auto-migrate legacy**: if no teams and `profiles.team_id` → insert into `team_members`
 6. **Auto-assign active**: if `active_team_id` null and teams exist → set first team as active
 
 ---
@@ -334,148 +380,77 @@ interface AuthContextType {
 ## 8. Screen-by-Screen Details
 
 ### `_layout.tsx`
-- Stack navigator with `CLOCKEA` logo (`headerLeft`) and profile icon (`headerRight`) on index screen only
-- Registered routes include `edit-session` (title: "Edit Notes")
+- Stack navigator; `headerShown: false` for index, working, session-recap, history, stats, profile
 
 ### `index.tsx` (Home)
-- **Context-aware hero**: idle → today total; clocked in → live `HH:MM:SS` timer + "View details →" pill
-- **Live Now card** — teammates' active sessions; single shared `setInterval`; filtered to exclude own session
-- **Tabbed sessions**: "Your Sessions" / "Team Sessions" with badge counts
-- **Fixed bottom action bar**: Clock In / Clock Out with spring animation
+- **Context-aware hero**: idle → today total; clocked in → live `HH:MM:SS` timer
+- **Live Now card** — teammates' active sessions; filtered to exclude own session
+- **Tabbed sessions**: "Your Sessions" / "Team Sessions" with badge counts; always 4 rows
+- **Skeleton loading**: shimmer animation while data loads
+- **Fixed bottom action bar**: Clock In / Clock Out with press depth animation
 
 ### `clock-in.tsx`
-- **Step 1** — project list (or add/edit project form)
-- **Step 2 — Objectives** (`'objective'` mode): multi-item checklist builder
-  - TextInput + **Add** button (or press Done on keyboard)
-  - Keyboard: `returnKeyType="done"`, `blurOnSubmit={true}` → adds item + dismisses keyboard
-  - Added items shown as removable rows with `×` button
-  - **Start Session** → `clockIn(projectId)` + `createSessionObjectives(sessionId, items)` if items exist
-  - **Skip objectives** → `clockIn(projectId)` with no checklist
+Multi-step flow with modes: `combos | client | project | activity | objective | add-client | add-project | edit-project | add-activity`
+
+**Combos screen (default):**
+- Shows last 5 recent (client, project, activity) combos → tap to instant clock-in
+- "New Session" button → starts full picker
+
+**Full picker flow:**
+1. `client` — list of team clients + "Add new client"
+2. `project` — projects filtered by selected client + "Add new project" + inline edit
+3. `activity` — activity types + billable toggle + "Add new activity type"
+4. `objective` — checklist builder (optional); breadcrumb shows project · activity
+5. Calls `clockIn(projectId, activityTypeId, { clientId, isBillable })`
 
 ### `working.tsx`
-- **← Dashboard** back nav at top
-- Scrollable middle: large timer + objectives checklist (if any)
-  - Each item: tap to toggle ✓/✗; optimistic update; strikethrough on completed
-  - Progress counter "X / Y" (turns green when all done)
-- Fixed bottom: Take a Break / Resume + Clock Out
+- `TickingClock` overlay on mount (2.5s)
+- `MilestoneConfetti` at 60-minute mark (fires once)
+- Scrollable: timer + objectives checklist (tap to toggle)
+- Fixed bottom: Take a Break / Resume + Clock Out (with press depth animation)
+- `playClockOutSound()` called before `await clockOut()`
 
 ### `session-recap.tsx`
-- Loads `getSessionObjectives(sessionId)` on mount
-- **Auto-suggests outcome** based on completion ratio:
-  - 100% → pre-selects "Achieved"
-  - ≥50% → pre-selects "Partially Achieved"
-  - <50% → pre-selects "Not Achieved"
-  - Outcome row shows "· auto-suggested" label; user can override
-- Read-only checklist card (✔/✗ per item + "X / Y completed")
-- Falls back to legacy `sessions.objective` text for old sessions without checklist
-- Notes TextInput (always optional)
-- `Save & Finish` disabled only when outcome picker is shown but nothing selected
-
-### `edit-session.tsx`
-- Simple notes editor; receives `{ id, notes }` params; auto-focuses keyboard
+- Auto-suggests outcome based on checklist completion ratio
+- Read-only checklist card; falls back to legacy `sessions.objective` text
 
 ### `history.tsx`
 - SectionList grouped by day
-- Batch-fetches objectives via `getObjectivesForSessions` after loading sessions
-- Passes `objectives={objectivesMap[item.id]}` to each `SessionItem`
+- Batch-fetches objectives via `getObjectivesForSessions`
 - Own sessions show `⋯` → Edit Notes / Delete
 
-### `stats.tsx` (Analytics)
+### `stats.tsx`
 - Period selector: Today / This Week / This Month
-- Two vertical cards: "My Sessions" + "Team Sessions" with donut charts
-- Fixed bottom action bar
+- **My Sessions** donut chart + legend
+- **Team Sessions** donut chart + legend
+- **By Client** horizontal bar list (all team sessions)
+- **By Activity** horizontal bar list (all team sessions)
+- Fixed bottom Clock In button
 
 ### `profile.tsx`
-- Team info from AuthContext; role: Admin or Participant
-- Members list via `get_teammate_ids` RPC; admin "Remove" button
-- Logout always enabled
+- Team info, role, members list (admin: remove button)
+- Team switcher (multi-team support)
+- **Clients card** — collapsible; list + add new client
+- **Activity Types card** — collapsible; list with color dots + add new with color picker
+- Admin: rename team, delete team, session log flush
+- Logout
 
 ### `SessionItem` component
 - Props: `session`, `hideMember?`, `prominentMember?`, `onActions?`, `objectives?`
+- Shows: project name → `client_name · activity_name` (orange) → date/time → member name
 - Expands when session has checklist objectives, legacy objective text, or notes
-- Expanded order: **Checklist** (✔/✗ + count) → **Outcome badge** → **Session Notes**
-- Backward compat: shows legacy `session.objective` text if no checklist objectives
 
 ---
 
 ## 9. Known Issues & TODOs
 
 - [ ] Delete a project
+- [ ] Archive a project (set `status = 'archived'`)
 - [ ] "Leave team" feature in profile
 - [ ] Push notifications for long sessions
 - [ ] Pagination on `getAllSessions` (currently returns all rows)
 - [ ] Reduce storage query waterfall: `getActiveTeamId()` + `getTeamProjectIds()` are separate round-trips
-- [ ] `stats.tsx` donut chart broken on web — `react-native-svg` doesn't resolve via Metro on web (fix: platform-specific `DonutChart.web.tsx` using native `<svg>`)
-
----
-
-## 12. Deployment
-
-### Vercel Setup
-- App is deployed to Vercel via GitHub repo `cheloman04/clockea_v1`
-- Local code also pushed to `cheloman04/Clockea` (source of truth)
-- Two git remotes configured:
-  ```
-  origin  → https://github.com/cheloman04/Clockea.git       (source)
-  vercel  → https://github.com/cheloman04/clockea_v1.git    (Vercel watches this)
-  ```
-- Deploy command: `git push origin main && git push vercel main`
-- `.npmrc` contains `legacy-peer-deps=true` to fix Vercel `npm install` peer-dep failures
-- `vercel.json`: `buildCommand: "npm install --legacy-peer-deps && npx expo export --platform web"`, `outputDirectory: "dist"`, SPA rewrites
-
----
-
-## 14. Changes — Mar 10–11 2026 (UX Polish + Navbar)
-
-### New Components
-- **`components/Navbar.tsx`** — Responsive navbar (replaces Stack header on main screens)
-  - Desktop/Tablet ≥768px: 3-column flex layout `[CLOCKEAPP] [Analytics · Logs] [Profile]`
-  - Mobile <768px: brand + hamburger `☰/✕`, dropdown (Profile → Analytics → Logs)
-  - `useWindowDimensions` for breakpoint, `useSafeAreaInsets` for top padding
-  - Active route highlighted via `useSegments`
-  - Integrated in: `index`, `stats`, `history`, `profile` — all set `headerShown: false`
-- **`components/TickingClock.tsx`** — Semi-transparent overlay with pulsing ring + animated clock hands; shows for 2.5s on session start, then fades out
-- **`components/MilestoneConfetti.tsx`** — 8 colored particles burst outward at 60-minute session mark; fires once per session; 650ms, non-blocking
-
-### New Utils
-- **`utils/sounds.ts`** — Web Audio API sounds (no packages)
-  - `playClockInSound()` — 880Hz triangle wave, 150ms
-  - `playClockOutSound()` — 440Hz triangle wave, 120ms
-  - Silent no-op on native; must be called **before** first `await` to satisfy browser gesture policy
-
-### UX Micro-interactions
-- **Press depth animation** on Clock In (dashboard) and Clock Out (working) buttons: scale 0.96 on press-in, back to 1 on release (120–150ms)
-- **Skeleton loading** on dashboard: hero + 4 session rows shimmer (opacity 0.3→0.7 loop) while Supabase data loads; `loading` state in `useFocusEffect`
-
-### Bug Fixes
-- **Break timer not pausing on dashboard**: `index.tsx` elapsed timer now subtracts both `total_break_seconds` (past breaks) and ongoing `break_start` duration → display freezes while on break
-- **Sound not firing in browser**: Moved `playClockInSound()` before first `await clockIn()` so AudioContext is created within the user-gesture frame
-
-### App Name
-- Renamed from **Clockea** → **CLOCKEAPP** in all visible UI (Navbar brand, `_layout.tsx` header removed)
-
----
-
-## 13. Changes Since Initial Deploy (Mar 2026)
-
-### UI / UX
-- **Session logs show date**: `SessionItem` now displays `formatDate · time – time` (e.g. `Today · 10:37 PM – 10:38 PM` or `Mar 9, 2026 · ...`)
-- **Dashboard always shows 4 slots**: Both "Your Sessions" and "Team Sessions" tabs always render 4 rows; empty slots show `"Your Next Session"` placeholder in muted italic
-- **"View more →" always visible**: Previously only shown when >4 sessions; now always shown
-- **Login logo replaced**: Custom `assets/clock-logo.png` (180×180, no background) replaces the hand-drawn SVG clock illustration on login screen
-
-### Bug Fixes
-- **`formatDate` timezone fix**: Replaced `toDateString()` comparison with explicit `getFullYear()/getMonth()/getDate()` — prevents UTC/local mismatch from labeling yesterday's sessions as "Today". "Yesterday" label removed; non-today dates show actual date string.
-- **Admin flush buttons (web)**: `Alert.alert` is a no-op on web browsers — confirmation dialog never showed. Fixed with `window.confirm` / `window.alert` on web, `Alert.alert` on native (same pattern as `handleClockOut`).
-- **Clock out on mobile web**: Fixed by patching `getActiveSession` (`.order + .limit(1)` before `.maybeSingle()`) and cleaning up orphaned sessions on `clockIn`. Deployed via `git push vercel main`.
-
-### Supabase
-- **`admin_flush_sessions` function**: Updated signature from `p_period TEXT` to `p_cutoff TIMESTAMPTZ`. Client now computes local-timezone midnight and passes it as ISO string — fixes timezone bug where Florida (UTC-4/5) sessions weren't matched by server-side `date_trunc('day', NOW())`.
-  ```sql
-  CREATE OR REPLACE FUNCTION admin_flush_sessions(p_cutoff TIMESTAMPTZ, p_team_id UUID)
-  RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
-  AS $$ ... DELETE FROM sessions WHERE project_id IN (...) AND start_time >= p_cutoff ... $$;
-  ```
+- [ ] `stats.tsx` donut chart broken on web — `react-native-svg` Metro resolution issue on web (fix: `DonutChart.web.tsx` using native `<svg>`)
 
 ---
 
@@ -506,12 +481,14 @@ interface AuthContextType {
 | `projects.created_by` not found | Column is `user_id`; fixed insert |
 | Logout button disabled | Was tied to profile `loading` state — removed |
 | New user team join failed at signup | Deferred via `user_metadata.pending_team_code`, applied on first login |
-| Teammate names not showing | `profiles.full_name` was null; fixed with SQL UPDATE + AuthContext sync on login |
-| Teammate profiles RLS blocked | `team_members` RLS blocked JOIN in profiles policy; fixed with `get_teammate_ids` SECURITY DEFINER function |
-| Clock out broken after refactor | `clock_out_session` RPC must be created in Supabase before the app can call it |
-| `duration_minutes` computed client-side | Moved to Postgres trigger `trg_session_duration`; `clockOut` now calls RPC |
-| `session_objectives` schema cache error | Table not yet created in Supabase; run SQL migration first |
-| Keyboard stuck open on mobile (objective input) | `blurOnSubmit={true}` + `returnKeyType="done"` on checklist TextInput |
+| Teammate names not showing | `profiles.full_name` was null; fixed with SQL UPDATE + AuthContext sync |
+| Teammate profiles RLS blocked | Fixed with `get_teammate_ids` SECURITY DEFINER function |
+| Clock out broken after refactor | `clock_out_session` RPC must exist in Supabase |
+| `duration_minutes` computed client-side | Moved to Postgres trigger `trg_session_duration` |
+| `session_objectives` schema cache error | Table not yet created in Supabase |
+| Keyboard stuck on mobile (objective input) | `blurOnSubmit={true}` + `returnKeyType="done"` |
+| PL/pgSQL `client_id` ambiguous in DO block | Renamed variable to `v_client_id` |
+| New project not appearing after add | `createProject` wasn't saving `client_id`; fixed by adding optional `clientId` param |
 
 ---
 
@@ -529,3 +506,87 @@ npx expo start --web --clear
 # Install missing dependencies
 npm install --legacy-peer-deps
 ```
+
+---
+
+## 12. Deployment
+
+### Vercel Setup
+- App is deployed to Vercel via GitHub repo `cheloman04/clockea_v1`
+- Local code also pushed to `cheloman04/Clockea` (source of truth)
+- Two git remotes configured:
+  ```
+  origin  → https://github.com/cheloman04/Clockea.git       (source)
+  vercel  → https://github.com/cheloman04/clockea_v1.git    (Vercel watches this)
+  ```
+- Deploy command: `git push origin main && git push vercel main`
+- `.npmrc` contains `legacy-peer-deps=true` to fix Vercel `npm install` peer-dep failures
+- `vercel.json`: `buildCommand: "npm install --legacy-peer-deps && npx expo export --platform web"`, `outputDirectory: "dist"`, SPA rewrites
+
+---
+
+## 13. Changes — Mar 11, 2026 (Client → Project → Activity Refactor)
+
+### Data Model
+New 4-level tracking hierarchy: **Client → Project → Activity Type → Session**
+
+**New tables:** `clients`, `activity_types`
+**New columns on `projects`:** `client_id` (FK → clients), `status` ('active'|'archived')
+**New columns on `sessions`:** `client_id`, `activity_type_id`, `is_billable`
+
+All session queries now use `SESSION_SELECT` with joins on all three related tables, and `mapSession()` flattens the nested data.
+
+### New Storage Functions
+- `getClients()`, `createClient(name, isInternal?)`
+- `getActivityTypes()`, `createActivityType(name, color?)`
+- `getRecentCombos()` — last 5 unique (client, project, activity) combos
+- `getProjects(clientId?)` — now filters by `status='active'`, optional clientId
+- `createProject(name, color, description?, clientId?)` — now saves `client_id`
+- `clockIn(projectId, activityTypeId?, opts?)` — now accepts activityTypeId, clientId, isBillable
+
+### `app/clock-in.tsx` — Full Rewrite
+Replaced single project-list screen with multi-step picker:
+- **Combos screen**: tap any recent combo to instant clock-in
+- **Client → Project → Activity → Objectives** step flow
+- Inline add forms for client, project (with client_id), activity type
+- Billable toggle on activity step
+- Back navigation between all steps
+
+### `components/SessionItem.tsx`
+- Added `client_name · activity_name` secondary line (orange, `#fe7f2d`) below project name
+
+### `app/profile.tsx`
+- Added collapsible **Clients** card: list + add new client
+- Added collapsible **Activity Types** card: list with color dots + add with color picker
+- Both visible to all team members (not admin-only)
+
+### `app/stats.tsx`
+- Added **By Client** horizontal bar chart (all team sessions)
+- Added **By Activity** horizontal bar chart (all team sessions)
+- Both use `HorizontalBarList` component with color dot + name + duration + fill bar
+
+---
+
+## 14. Changes — Mar 10–11, 2026 (UX Polish + Navbar)
+
+### New Components
+- **`components/Navbar.tsx`** — Responsive navbar
+  - Desktop/Tablet ≥768px: 3-column flex `[CLOCKEAPP] [Analytics · Logs] [Profile]`
+  - Mobile: brand + hamburger `☰/✕`, dropdown menu
+- **`components/TickingClock.tsx`** — Animated overlay on session start (2.5s)
+- **`components/MilestoneConfetti.tsx`** — 8-particle burst at 60-minute mark
+
+### New Utils
+- **`utils/sounds.ts`** — `playClockInSound()` (880Hz) + `playClockOutSound()` (440Hz)
+  - Must be called **before** first `await` to satisfy browser gesture policy
+
+### UX Micro-interactions
+- Press depth animation on Clock In and Clock Out buttons (scale 0.96 on press)
+- Skeleton loading on dashboard while Supabase data loads
+
+### Bug Fixes
+- Break timer not pausing on dashboard → now subtracts ongoing `break_start` duration
+- Sound not firing in browser → moved sound call before first `await`
+
+### App Name
+- Renamed **Clockea** → **CLOCKEAPP** in all visible UI

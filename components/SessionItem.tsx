@@ -38,6 +38,11 @@ export default function SessionItem({ session, hideMember, prominentMember, onAc
         <View style={[styles.dot, { backgroundColor: session.project_color }]} />
         <View style={styles.info}>
           <Text style={styles.project}>{session.project_name}</Text>
+          {(session.client_name || session.activity_name) && (
+            <Text style={styles.sessionMeta}>
+              {[session.client_name, session.activity_name].filter(Boolean).join('  ·  ')}
+            </Text>
+          )}
           <Text style={styles.time}>
             {formatDate(session.start_time)} · {formatTime(session.start_time)}
             {session.end_time ? ` – ${formatTime(session.end_time)}` : ''}
@@ -153,6 +158,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#ffffff',
     marginBottom: 3,
+  },
+  sessionMeta: {
+    fontSize: 12,
+    color: '#fe7f2d',
+    marginBottom: 2,
+    fontWeight: '500',
   },
   time: {
     fontSize: 12,

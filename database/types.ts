@@ -5,12 +5,42 @@ export interface Team {
   created_by: string | null;
 }
 
+export interface Client {
+  id: string;
+  name: string;
+  team_id: string;
+  is_internal: boolean;
+  created_by?: string;
+  created_at: string;
+}
+
+export interface ActivityType {
+  id: string;
+  name: string;
+  color: string;
+  team_id: string;
+}
+
+export interface RecentCombo {
+  client_id: string;
+  project_id: number;
+  activity_type_id: string;
+  client_name: string;
+  project_name: string;
+  project_color: string;
+  activity_name: string;
+  activity_color: string;
+}
+
 export interface Project {
   id: number;
   name: string;
   color: string;
   description?: string;
   team_id?: string;
+  client_id?: string;
+  client_name?: string;
+  status: 'active' | 'archived';
 }
 
 export interface Session {
@@ -25,9 +55,15 @@ export interface Session {
   notes?: string;
   objective?: string;
   outcome?: 'achieved' | 'partial' | 'missed';
+  // denormalized for display
   project_name?: string;
   project_color?: string;
   user_full_name?: string;
+  client_id?: string;
+  client_name?: string;
+  activity_type_id?: string;
+  activity_name?: string;
+  is_billable: boolean;
 }
 
 export interface SessionObjective {

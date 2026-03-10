@@ -5,6 +5,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import Navbar from '../components/Navbar';
 import { supabase } from '../lib/supabase';
+import {
+  createActivityType,
+  createClient,
+  getActivityTypes,
+  getClients,
+} from '../database/storage';
+import { ActivityType, Client } from '../database/types';
+
+const ACTIVITY_PALETTE = ['#fe7f2d', '#60a5fa', '#f87171', '#c084fc', '#fbbf24', '#4ade80', '#34d399', '#fb923c'];
 
 
 export default function ProfileScreen() {
@@ -17,6 +26,19 @@ export default function ProfileScreen() {
   const [teamMembers, setTeamMembers] = useState<Array<{ id: string; full_name: string }>>([]);
   const [teamNameEdit, setTeamNameEdit] = useState('');
   const [savingName, setSavingName] = useState(false);
+
+  // Clients management
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientsOpen, setClientsOpen] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [addingClient, setAddingClient] = useState(false);
+
+  // Activity types management
+  const [activities, setActivities] = useState<ActivityType[]>([]);
+  const [activitiesOpen, setActivitiesOpen] = useState(false);
+  const [newActivityName, setNewActivityName] = useState('');
+  const [newActivityColor, setNewActivityColor] = useState(ACTIVITY_PALETTE[0]);
+  const [addingActivity, setAddingActivity] = useState(false);
 
   // Derive active team info from AuthContext
   const activeTeam = userTeams.find((t) => t.id === activeTeamId) ?? null;
@@ -49,6 +71,10 @@ export default function ProfileScreen() {
     } else {
       setTeamMembers([]);
     }
+
+    // Load clients and activity types
+    getClients().then(setClients).catch(() => {});
+    getActivityTypes().then(setActivities).catch(() => {});
   }, [user]);
 
   useFocusEffect(
@@ -188,6 +214,39 @@ export default function ProfileScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: doFlush },
       ]);
+    }
+  }
+
+  async function handleAddClient() {
+    if (!newClientName.trim()) return;
+    setAddingClient(true);
+    try {
+      await createClient(newClientName.trim());
+      setNewClientName('');
+      const data = await getClients();
+      setClients(data);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not create client.';
+      if (Platform.OS === 'web') window.alert(msg); else Alert.alert('Error', msg);
+    } finally {
+      setAddingClient(false);
+    }
+  }
+
+  async function handleAddActivity() {
+    if (!newActivityName.trim()) return;
+    setAddingActivity(true);
+    try {
+      await createActivityType(newActivityName.trim(), newActivityColor);
+      setNewActivityName('');
+      setNewActivityColor(ACTIVITY_PALETTE[0]);
+      const data = await getActivityTypes();
+      setActivities(data);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not create activity type.';
+      if (Platform.OS === 'web') window.alert(msg); else Alert.alert('Error', msg);
+    } finally {
+      setAddingActivity(false);
     }
   }
 
@@ -386,6 +445,106 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        )}
+
+        {/* Clients & Activity Types (all team members) */}
+        {activeTeamId && (
+          <>
+            {/* Clients card */}
+            <View style={styles.dataCard}>
+              <TouchableOpacity
+                style={styles.dataCardHeader}
+                onPress={() => setClientsOpen((v) => !v)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.dataCardTitle}>Clients</Text>
+                <Text style={styles.dataCardChevron}>{clientsOpen ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+              {clientsOpen && (
+                <View style={styles.dataCardBody}>
+                  {clients.length === 0 ? (
+                    <Text style={styles.dataCardEmpty}>No clients yet.</Text>
+                  ) : (
+                    clients.map((c) => (
+                      <View key={c.id} style={styles.dataRow}>
+                        <Text style={styles.dataRowText}>{c.name}</Text>
+                        {c.is_internal && <Text style={styles.internalBadge}>Internal</Text>}
+                      </View>
+                    ))
+                  )}
+                  <View style={styles.dataAddRow}>
+                    <TextInput
+                      style={styles.dataInput}
+                      placeholder="New client name"
+                      placeholderTextColor="#4a6d80"
+                      value={newClientName}
+                      onChangeText={setNewClientName}
+                    />
+                    <TouchableOpacity
+                      style={[styles.dataAddBtn, (!newClientName.trim() || addingClient) && styles.btnDisabled]}
+                      onPress={handleAddClient}
+                      disabled={!newClientName.trim() || addingClient}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.dataAddBtnText}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* Activity Types card */}
+            <View style={styles.dataCard}>
+              <TouchableOpacity
+                style={styles.dataCardHeader}
+                onPress={() => setActivitiesOpen((v) => !v)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.dataCardTitle}>Activity Types</Text>
+                <Text style={styles.dataCardChevron}>{activitiesOpen ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+              {activitiesOpen && (
+                <View style={styles.dataCardBody}>
+                  {activities.length === 0 ? (
+                    <Text style={styles.dataCardEmpty}>No activity types yet.</Text>
+                  ) : (
+                    activities.map((a) => (
+                      <View key={a.id} style={styles.dataRow}>
+                        <View style={[styles.dataColorDot, { backgroundColor: a.color }]} />
+                        <Text style={styles.dataRowText}>{a.name}</Text>
+                      </View>
+                    ))
+                  )}
+                  <Text style={styles.dataSubLabel}>Name</Text>
+                  <TextInput
+                    style={[styles.dataInput, { marginBottom: 8 }]}
+                    placeholder="e.g. Development"
+                    placeholderTextColor="#4a6d80"
+                    value={newActivityName}
+                    onChangeText={setNewActivityName}
+                  />
+                  <Text style={styles.dataSubLabel}>Color</Text>
+                  <View style={styles.colorPickerRow}>
+                    {ACTIVITY_PALETTE.map((c) => (
+                      <TouchableOpacity
+                        key={c}
+                        style={[styles.colorDot, { backgroundColor: c }, newActivityColor === c && styles.colorSelected]}
+                        onPress={() => setNewActivityColor(c)}
+                      />
+                    ))}
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.dataAddBtnFull, (!newActivityName.trim() || addingActivity) && styles.btnDisabled]}
+                    onPress={handleAddActivity}
+                    disabled={!newActivityName.trim() || addingActivity}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.dataAddBtnText}>Add Activity Type</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </>
         )}
 
         <TouchableOpacity
@@ -742,5 +901,132 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // Clients / Activity Types cards
+  dataCard: {
+    marginTop: 16,
+    backgroundColor: '#233d4d',
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  dataCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  dataCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  dataCardChevron: {
+    fontSize: 10,
+    color: '#4a6d80',
+  },
+  dataCardBody: {
+    borderTopWidth: 1,
+    borderTopColor: '#2d4f62',
+    padding: 16,
+    gap: 6,
+  },
+  dataCardEmpty: {
+    color: '#4a6d80',
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  dataRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d4f62',
+  },
+  dataColorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    flexShrink: 0,
+  },
+  dataRowText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#ffffff',
+    fontWeight: '500',
+  },
+  internalBadge: {
+    fontSize: 11,
+    color: '#7aa3b8',
+    backgroundColor: '#2d4f62',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    fontWeight: '600',
+  },
+  dataAddRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  dataSubLabel: {
+    fontSize: 10,
+    color: '#7aa3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    fontWeight: '700',
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  dataInput: {
+    flex: 1,
+    backgroundColor: '#1e3545',
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#ffffff',
+  },
+  dataAddBtn: {
+    backgroundColor: '#fe7f2d',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dataAddBtnFull: {
+    backgroundColor: '#fe7f2d',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  dataAddBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  colorPickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 4,
+  },
+  colorDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  colorSelected: {
+    borderWidth: 3,
+    borderColor: '#ffffff',
   },
 });

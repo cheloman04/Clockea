@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { Project, Session, SessionObjective } from './types';
+import { ActivityType, Client, Project, RecentCombo, Session, SessionObjective } from './types';
 
 function ensureNoError(error: { message: string } | null) {
   if (error) throw new Error(error.message);
@@ -34,18 +34,133 @@ async function enrichWithUserNames(sessions: any[]): Promise<any[]> {
   return sessions.map((s) => ({ ...s, user_full_name: nameMap[s.user_id] ?? null }));
 }
 
+const SESSION_SELECT =
+  '*, projects!project_id(name, color), clients!client_id(name), activity_types!activity_type_id(name, color)';
+
+function mapSession(s: any): Session {
+  return {
+    ...s,
+    project_name: s.projects?.name,
+    project_color: s.projects?.color,
+    client_name: s.clients?.name,
+    activity_name: s.activity_types?.name,
+    activity_color: s.activity_types?.color,
+  };
+}
+
 export async function initDb(): Promise<void> {}
 
-export async function getProjects(): Promise<Project[]> {
+// ── Clients ───────────────────────────────────────────────────────────────────
+
+export async function getClients(): Promise<Client[]> {
   const teamId = await getActiveTeamId();
   if (!teamId) return [];
   const { data, error } = await supabase
-    .from('projects')
+    .from('clients')
     .select('*')
     .eq('team_id', teamId)
     .order('name');
   ensureNoError(error);
-  return (data ?? []) as Project[];
+  return (data ?? []) as Client[];
+}
+
+export async function createClient(name: string, isInternal = false): Promise<Client> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const teamId = await getActiveTeamId();
+  if (!teamId) throw new Error('No active team.');
+  const { data, error } = await supabase
+    .from('clients')
+    .insert({ name, team_id: teamId, is_internal: isInternal, created_by: user!.id })
+    .select()
+    .single();
+  ensureNoError(error);
+  return data as Client;
+}
+
+// ── Activity Types ─────────────────────────────────────────────────────────────
+
+export async function getActivityTypes(): Promise<ActivityType[]> {
+  const teamId = await getActiveTeamId();
+  if (!teamId) return [];
+  const { data, error } = await supabase
+    .from('activity_types')
+    .select('*')
+    .eq('team_id', teamId)
+    .order('name');
+  ensureNoError(error);
+  return (data ?? []) as ActivityType[];
+}
+
+export async function createActivityType(name: string, color = '#7aa3b8'): Promise<ActivityType> {
+  const teamId = await getActiveTeamId();
+  if (!teamId) throw new Error('No active team.');
+  const { data, error } = await supabase
+    .from('activity_types')
+    .insert({ name, color, team_id: teamId })
+    .select()
+    .single();
+  ensureNoError(error);
+  return data as ActivityType;
+}
+
+// ── Recent Combos ──────────────────────────────────────────────────────────────
+
+export async function getRecentCombos(): Promise<RecentCombo[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data, error } = await supabase
+    .from('sessions')
+    .select(
+      'client_id, project_id, activity_type_id, start_time, ' +
+      'clients!client_id(name), projects!project_id(name, color), activity_types!activity_type_id(name, color)'
+    )
+    .eq('user_id', user.id)
+    .not('client_id', 'is', null)
+    .not('activity_type_id', 'is', null)
+    .not('end_time', 'is', null)
+    .order('start_time', { ascending: false })
+    .limit(50);
+  if (error || !data) return [];
+
+  const seen = new Set<string>();
+  const combos: RecentCombo[] = [];
+  for (const s of data as any[]) {
+    const key = `${s.client_id}|${s.project_id}|${s.activity_type_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    combos.push({
+      client_id: s.client_id,
+      project_id: s.project_id,
+      activity_type_id: s.activity_type_id,
+      client_name: s.clients?.name ?? '',
+      project_name: s.projects?.name ?? '',
+      project_color: s.projects?.color ?? '#ccc',
+      activity_name: s.activity_types?.name ?? '',
+      activity_color: s.activity_types?.color ?? '#7aa3b8',
+    });
+    if (combos.length >= 5) break;
+  }
+  return combos;
+}
+
+// ── Projects ───────────────────────────────────────────────────────────────────
+
+export async function getProjects(clientId?: string): Promise<Project[]> {
+  const teamId = await getActiveTeamId();
+  if (!teamId) return [];
+  let query = supabase
+    .from('projects')
+    .select('*, clients!client_id(name)')
+    .eq('team_id', teamId)
+    .eq('status', 'active')
+    .order('name');
+  if (clientId) query = query.eq('client_id', clientId);
+  const { data, error } = await query;
+  ensureNoError(error);
+  return (data ?? []).map((p: any) => ({
+    ...p,
+    client_name: p.clients?.name,
+  })) as Project[];
 }
 
 export async function getActiveSession(): Promise<Session | null> {
@@ -53,22 +168,23 @@ export async function getActiveSession(): Promise<Session | null> {
   if (!user) return null;
   const { data, error } = await supabase
     .from('sessions')
-    .select('*, projects!project_id(name, color)')
+    .select(SESSION_SELECT)
     .eq('user_id', user.id)
     .is('end_time', null)
     .order('start_time', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error || !data) return null;
-  const p = data.projects as { name: string; color: string } | null;
-  return { ...data, project_name: p?.name, project_color: p?.color } as Session;
+  return mapSession(data);
 }
 
-export async function clockIn(projectId: number, objective?: string): Promise<number> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  // Close any orphaned active sessions before starting a new one
+export async function clockIn(
+  projectId: number,
+  activityTypeId?: string,
+  opts?: { clientId?: string; isBillable?: boolean; objective?: string }
+): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  // Close any orphaned active sessions
   await supabase
     .from('sessions')
     .update({ end_time: new Date().toISOString() })
@@ -81,7 +197,10 @@ export async function clockIn(projectId: number, objective?: string): Promise<nu
       user_id: user!.id,
       start_time: new Date().toISOString(),
       total_break_seconds: 0,
-      ...(objective ? { objective } : {}),
+      ...(activityTypeId ? { activity_type_id: activityTypeId } : {}),
+      ...(opts?.clientId ? { client_id: opts.clientId } : {}),
+      ...(opts?.isBillable !== undefined ? { is_billable: opts.isBillable } : {}),
+      ...(opts?.objective ? { objective: opts.objective } : {}),
     })
     .select('id')
     .single();
@@ -131,17 +250,13 @@ export async function getTodaySessions(): Promise<Session[]> {
   const today = new Date().toISOString().split('T')[0];
   const { data, error } = await supabase
     .from('sessions')
-    .select('*, projects!project_id(name, color)')
+    .select(SESSION_SELECT)
     .in('project_id', projectIds)
     .gte('start_time', `${today}T00:00:00`)
     .not('end_time', 'is', null)
     .order('start_time', { ascending: false });
   if (error || !data) return [];
-  const raw = data.map((s: any) => ({
-    ...s,
-    project_name: s.projects?.name,
-    project_color: s.projects?.color,
-  }));
+  const raw = (data as any[]).map(mapSession);
   return (await enrichWithUserNames(raw)) as Session[];
 }
 
@@ -152,16 +267,12 @@ export async function getAllSessions(): Promise<Session[]> {
   if (projectIds.length === 0) return [];
   const { data, error } = await supabase
     .from('sessions')
-    .select('*, projects!project_id(name, color)')
+    .select(SESSION_SELECT)
     .in('project_id', projectIds)
     .not('end_time', 'is', null)
     .order('start_time', { ascending: false });
   if (error || !data) return [];
-  const raw = data.map((s: any) => ({
-    ...s,
-    project_name: s.projects?.name,
-    project_color: s.projects?.color,
-  }));
+  const raw = (data as any[]).map(mapSession);
   return (await enrichWithUserNames(raw)) as Session[];
 }
 
@@ -179,13 +290,16 @@ export async function getTodayTotalMinutes(): Promise<number> {
   return data.reduce((sum: number, s: any) => sum + (s.duration_minutes ?? 0), 0);
 }
 
-export async function createProject(name: string, color: string, description?: string): Promise<void> {
+export async function createProject(name: string, color: string, description?: string, clientId?: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   const teamId = await getActiveTeamId();
   if (!teamId) throw new Error('No active team. Join or create a team first.');
   const { error } = await supabase
     .from('projects')
-    .insert({ name, color, description: description ?? '', team_id: teamId, user_id: user!.id });
+    .insert({
+      name, color, description: description ?? '', team_id: teamId, user_id: user!.id,
+      ...(clientId ? { client_id: clientId } : {}),
+    });
   ensureNoError(error);
 }
 
@@ -206,17 +320,13 @@ export async function getSessionsInRange(from: string, to: string): Promise<Sess
   if (projectIds.length === 0) return [];
   const { data, error } = await supabase
     .from('sessions')
-    .select('*, projects!project_id(name, color)')
+    .select(SESSION_SELECT)
     .in('project_id', projectIds)
     .gte('start_time', from)
     .lte('start_time', to)
     .not('end_time', 'is', null);
   if (error || !data) return [];
-  const raw = data.map((s: any) => ({
-    ...s,
-    project_name: s.projects?.name,
-    project_color: s.projects?.color,
-  }));
+  const raw = (data as any[]).map(mapSession);
   return (await enrichWithUserNames(raw)) as Session[];
 }
 
@@ -257,16 +367,12 @@ export async function getActiveSessions(): Promise<Session[]> {
   if (projectIds.length === 0) return [];
   const { data, error } = await supabase
     .from('sessions')
-    .select('*, projects!project_id(name, color)')
+    .select(SESSION_SELECT)
     .in('project_id', projectIds)
     .is('end_time', null)
     .order('start_time', { ascending: true });
   if (error || !data) return [];
-  const raw = data.map((s: any) => ({
-    ...s,
-    project_name: s.projects?.name,
-    project_color: s.projects?.color,
-  }));
+  const raw = (data as any[]).map(mapSession);
   return (await enrichWithUserNames(raw)) as Session[];
 }
 
