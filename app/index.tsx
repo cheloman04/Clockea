@@ -2,6 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -300,11 +301,11 @@ export default function HomeScreen() {
             onPress={handleClockPress}
             activeOpacity={0.9}
           >
-            <View style={styles.clockIconRing}>
-              <View style={styles.clockHandH} />
-              <View style={styles.clockHandM} />
-              <View style={styles.clockCenter} />
-            </View>
+            <Image
+              source={require('../assets/clock-logo.png')}
+              style={styles.clockLogo}
+              resizeMode="contain"
+            />
             <Text style={styles.clockBtnText}>
               {activeSession ? 'Clock Out' : 'Clock In'}
             </Text>
@@ -684,45 +685,9 @@ const styles = StyleSheet.create({
   clockBtnActive: {
     backgroundColor: '#e05a1a',
   },
-  clockIconRing: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  clockHandH: {
-    position: 'absolute',
-    width: 1.5,
-    height: 6,
-    backgroundColor: '#ffffff',
-    borderRadius: 1,
-    bottom: '50%',
-    left: '50%',
-    marginLeft: -0.75,
-    transformOrigin: 'bottom',
-    transform: [{ rotate: '-30deg' }],
-  },
-  clockHandM: {
-    position: 'absolute',
-    width: 1.5,
-    height: 7,
-    backgroundColor: '#ffffff',
-    borderRadius: 1,
-    bottom: '50%',
-    left: '50%',
-    marginLeft: -0.75,
-    transformOrigin: 'bottom',
-    transform: [{ rotate: '60deg' }],
-  },
-  clockCenter: {
-    width: 2.5,
-    height: 2.5,
-    borderRadius: 1.25,
-    backgroundColor: '#ffffff',
+  clockLogo: {
+    width: 28,
+    height: 28,
   },
   clockBtnText: {
     color: '#ffffff',
