@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   ScrollView,
@@ -60,19 +60,17 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
-      async function load() {
-        try {
-          const active = await getActiveSession();
-          setActiveSession(active);
-          setTodayMinutes(await getTodayTotalMinutes());
-          setTodaySessions(await getTodaySessions());
-          const all = await getActiveSessions();
-          setLiveTeam(all.filter((s) => s.user_id !== user?.id));
-        } finally {
-          setLoading(false);
-        }
-      }
-      load();
+      Promise.all([
+        getActiveSession(),
+        getTodayTotalMinutes(),
+        getTodaySessions(),
+        getActiveSessions(),
+      ]).then(([active, minutes, sessions, all]) => {
+        setActiveSession(active);
+        setTodayMinutes(minutes);
+        setTodaySessions(sessions);
+        setLiveTeam(all.filter((s) => s.user_id !== user?.id));
+      }).finally(() => setLoading(false));
     }, [user])
   );
 
@@ -127,23 +125,37 @@ export default function HomeScreen() {
     );
   }
 
-  const mySessions = todaySessions.filter((s) => s.user_id === user?.id);
-  const teamSessions = todaySessions.filter((s) => s.user_id !== user?.id);
-
-  const myProjectTotals = mySessions.reduce<Record<string, { name: string; minutes: number }>>(
-    (acc, session) => {
-      const key = String(session.project_id);
-      if (!acc[key]) acc[key] = { name: session.project_name ?? 'Unknown', minutes: 0 };
-      acc[key].minutes += session.duration_minutes ?? 0;
-      return acc;
-    },
-    {}
+  const mySessions = useMemo(
+    () => todaySessions.filter((s) => s.user_id === user?.id),
+    [todaySessions, user]
+  );
+  const teamSessions = useMemo(
+    () => todaySessions.filter((s) => s.user_id !== user?.id),
+    [todaySessions, user]
   );
 
-  const topProject = Object.values(myProjectTotals).sort((a, b) => b.minutes - a.minutes)[0];
-  const averageMinutes = mySessions.length > 0 ? Math.round(todayMinutes / mySessions.length) : 0;
-  const fullName = (user?.user_metadata?.full_name as string | undefined)?.trim() ?? '';
-  const firstName = fullName.split(/\s+/).filter(Boolean)[0] ?? 'User';
+  const topProject = useMemo(() => {
+    const totals = mySessions.reduce<Record<string, { name: string; minutes: number }>>(
+      (acc, s) => {
+        const key = String(s.project_id);
+        if (!acc[key]) acc[key] = { name: s.project_name ?? 'Unknown', minutes: 0 };
+        acc[key].minutes += s.duration_minutes ?? 0;
+        return acc;
+      },
+      {}
+    );
+    return Object.values(totals).sort((a, b) => b.minutes - a.minutes)[0];
+  }, [mySessions]);
+
+  const averageMinutes = useMemo(
+    () => (mySessions.length > 0 ? Math.round(todayMinutes / mySessions.length) : 0),
+    [mySessions.length, todayMinutes]
+  );
+
+  const firstName = useMemo(() => {
+    const full = (user?.user_metadata?.full_name as string | undefined)?.trim() ?? '';
+    return full.split(/\s+/).filter(Boolean)[0] ?? 'User';
+  }, [user]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>

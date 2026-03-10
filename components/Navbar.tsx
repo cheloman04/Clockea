@@ -19,7 +19,7 @@ interface LinkProps {
   onPress: () => void;
 }
 
-function NavLink({ label, active, onPress }: LinkProps) {
+const NavLink = React.memo(function NavLink({ label, active, onPress }: LinkProps) {
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -29,9 +29,9 @@ function NavLink({ label, active, onPress }: LinkProps) {
       <Text style={[styles.link, active && styles.linkActive]}>{label}</Text>
     </TouchableOpacity>
   );
-}
+});
 
-function DropdownItem({ label, active, onPress }: LinkProps) {
+const DropdownItem = React.memo(function DropdownItem({ label, active, onPress }: LinkProps) {
   return (
     <TouchableOpacity
       style={[styles.dropItem, active && styles.dropItemActive]}
@@ -41,7 +41,7 @@ function DropdownItem({ label, active, onPress }: LinkProps) {
       <Text style={[styles.dropLabel, active && styles.dropLabelActive]}>{label}</Text>
     </TouchableOpacity>
   );
-}
+});
 
 // ── Main component ────────────────────────────────────────────────────────────
 

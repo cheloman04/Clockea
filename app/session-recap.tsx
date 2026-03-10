@@ -13,14 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getSessionObjectives, saveSessionNotes, saveSessionOutcome } from '../database/storage';
 import { SessionObjective } from '../database/types';
-
-type Outcome = 'achieved' | 'partial' | 'missed';
-
-const OUTCOMES: { value: Outcome; label: string; hint: string; color: string }[] = [
-  { value: 'achieved', label: 'Achieved',           hint: 'Completed as planned',    color: '#4ade80' },
-  { value: 'partial',  label: 'Partially Achieved',  hint: 'Made progress, not done', color: '#fe7f2d' },
-  { value: 'missed',   label: 'Not Achieved',        hint: 'Did not reach the goal',  color: '#EF4444' },
-];
+import { Outcome, OUTCOMES } from '../utils/outcomes';
 
 export default function SessionRecapScreen() {
   const router = useRouter();

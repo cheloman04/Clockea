@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Session, SessionObjective } from '../database/types';
 import { formatDate, formatMinutes, formatTime } from '../utils/time';
+import { OUTCOME_CONFIG } from '../utils/outcomes';
 
 interface SessionItemProps {
   session: Session;
@@ -11,22 +12,13 @@ interface SessionItemProps {
   objectives?: SessionObjective[];
 }
 
-const OUTCOME_CONFIG: Record<
-  'achieved' | 'partial' | 'missed',
-  { label: string; color: string }
-> = {
-  achieved: { label: 'Achieved',           color: '#4ade80' },
-  partial:  { label: 'Partially Achieved', color: '#fe7f2d' },
-  missed:   { label: 'Not Achieved',       color: '#EF4444' },
-};
-
-export default function SessionItem({ session, hideMember, prominentMember, onActions, objectives }: SessionItemProps) {
+function SessionItem({ session, hideMember, prominentMember, onActions, objectives }: SessionItemProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const hasNotes      = !!session.notes?.trim();
-  const hasObjective  = !!session.objective?.trim();
-  const hasChecklist  = !!objectives && objectives.length > 0;
-  const hasExpanded   = hasNotes || hasObjective || hasChecklist;
+  const hasNotes     = !!session.notes?.trim();
+  const hasObjective = !!session.objective?.trim();
+  const hasChecklist = !!objectives && objectives.length > 0;
+  const hasExpanded  = hasNotes || hasObjective || hasChecklist;
 
   return (
     <View style={styles.wrapper}>
@@ -107,17 +99,14 @@ export default function SessionItem({ session, hideMember, prominentMember, onAc
           )}
 
           {/* Outcome */}
-          {session.outcome && (() => {
-            const cfg = OUTCOME_CONFIG[session.outcome];
-            return (
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Outcome</Text>
-                <Text style={[styles.outcomeBadge, { color: cfg.color }]}>
-                  {cfg.label}
-                </Text>
-              </View>
-            );
-          })()}
+          {session.outcome && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Outcome</Text>
+              <Text style={[styles.outcomeBadge, { color: OUTCOME_CONFIG[session.outcome].color }]}>
+                {OUTCOME_CONFIG[session.outcome].label}
+              </Text>
+            </View>
+          )}
 
           {/* Notes */}
           {hasNotes && (
@@ -131,6 +120,8 @@ export default function SessionItem({ session, hideMember, prominentMember, onAc
     </View>
   );
 }
+
+export default React.memo(SessionItem);
 
 const styles = StyleSheet.create({
   wrapper: {

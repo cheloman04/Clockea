@@ -109,7 +109,7 @@ function buildStats(sessions: Session[], dimension: Dimension): Stat[] {
       if (!s.activity_type_id) continue;
       key = s.activity_type_id;
       name = s.activity_name ?? '—';
-      color = (s as any).activity_color ?? '#7aa3b8';
+      color = s.activity_color ?? '#7aa3b8';
     }
 
     if (!map.has(key)) {

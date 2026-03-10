@@ -53,15 +53,14 @@ export default function ProfileScreen() {
 
   const loadProfile = useCallback(async () => {
     if (!user) return;
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', user.id)
-      .single();
+
+    // Fetch profile, teammate IDs, clients, and activities in parallel
+    const [{ data: profile }, { data: ids }] = await Promise.all([
+      supabase.from('profiles').select('full_name').eq('id', user.id).single(),
+      supabase.rpc('get_teammate_ids', { p_user_id: user.id }),
+    ]);
     setFullName(profile?.full_name || user.user_metadata?.full_name || '');
 
-    // Load teammates via security-definer function
-    const { data: ids } = await supabase.rpc('get_teammate_ids', { p_user_id: user.id });
     if (ids && (ids as string[]).length > 0) {
       const { data: members } = await supabase
         .from('profiles')
@@ -72,7 +71,7 @@ export default function ProfileScreen() {
       setTeamMembers([]);
     }
 
-    // Load clients and activity types
+    // Load clients and activity types concurrently
     getClients().then(setClients).catch(() => {});
     getActivityTypes().then(setActivities).catch(() => {});
   }, [user]);

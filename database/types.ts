@@ -63,6 +63,7 @@ export interface Session {
   client_name?: string;
   activity_type_id?: string;
   activity_name?: string;
+  activity_color?: string;
   is_billable: boolean;
 }
 
