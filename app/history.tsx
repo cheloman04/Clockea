@@ -3,6 +3,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionItem from '../components/SessionItem';
+import Navbar from '../components/Navbar';
 import { deleteSession, getAllSessions, getObjectivesForSessions } from '../database/storage';
 import { Session, SessionObjective } from '../database/types';
 import { useAuth } from '../contexts/AuthContext';
@@ -89,6 +90,7 @@ export default function HistoryScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
+      <Navbar />
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id.toString()}

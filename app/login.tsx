@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -15,94 +16,19 @@ import { useAuth } from '../contexts/AuthContext';
 
 function ClockLogo() {
   return (
-    <View style={logo.outerCircle}>
-      {/* Clock body */}
-      <View style={logo.clockBody}>
-        {/* Clock face */}
-        <View style={logo.clockFace}>
-          {/* Hour hand */}
-          <View style={[logo.hand, logo.hourHand]} />
-          {/* Minute hand */}
-          <View style={[logo.hand, logo.minuteHand]} />
-          {/* Center dot */}
-          <View style={logo.centerDot} />
-        </View>
-        {/* Paper strip */}
-        <View style={logo.paper}>
-          <View style={logo.paperLine} />
-          <View style={logo.paperLine} />
-          <View style={logo.paperLine} />
-        </View>
-      </View>
-    </View>
+    <Image
+      source={require('../assets/clock-logo.png')}
+      style={logo.image}
+      resizeMode="contain"
+    />
   );
 }
 
 const logo = StyleSheet.create({
-  outerCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#f5ede0',
-    alignItems: 'center',
-    justifyContent: 'center',
+  image: {
+    width: 180,
+    height: 180,
     marginBottom: 16,
-  },
-  clockBody: {
-    width: 64,
-    height: 72,
-    backgroundColor: '#fe7f2d',
-    borderRadius: 10,
-    alignItems: 'center',
-    paddingTop: 8,
-    gap: 4,
-  },
-  clockFace: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#1e3545',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  hand: {
-    position: 'absolute',
-    backgroundColor: '#ffffff',
-    borderRadius: 2,
-    bottom: '50%',
-    left: '50%',
-    transformOrigin: 'bottom center',
-  },
-  hourHand: {
-    width: 2,
-    height: 12,
-    marginLeft: -1,
-    transform: [{ rotate: '-30deg' }],
-  },
-  minuteHand: {
-    width: 2,
-    height: 16,
-    marginLeft: -1,
-    transform: [{ rotate: '60deg' }],
-  },
-  centerDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#fe7f2d',
-  },
-  paper: {
-    width: 38,
-    backgroundColor: '#ffffff',
-    borderRadius: 3,
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-    gap: 3,
-  },
-  paperLine: {
-    height: 2,
-    backgroundColor: '#ccc',
-    borderRadius: 1,
   },
 });
 

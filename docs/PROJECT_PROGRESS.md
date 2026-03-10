@@ -1,6 +1,6 @@
 # TimeTracker — Project Progress & Context Document
 
-> Last updated: 2026-03-09
+> Last updated: 2026-03-11
 > Purpose: Full context for continuing development across sessions/chats.
 > Audience: Internal tool — personal use only (single user + invited teammates).
 
@@ -74,8 +74,11 @@ TimeTracker/
 ├── components/
 │   ├── Timer.tsx            # Displays net work time (excludes breaks)
 │   ├── ProjectCard.tsx      # Project row with colored accent + edit button
-│   └── SessionItem.tsx      # Session row with expand: checklist (✔/✘) → outcome badge → notes
-│                              Props: hideMember?, prominentMember?, onActions?, objectives?
+│   ├── SessionItem.tsx      # Session row with expand: checklist (✔/✘) → outcome badge → notes
+│   │                          Props: hideMember?, prominentMember?, onActions?, objectives?
+│   ├── Navbar.tsx           # Responsive navbar: desktop 3-col / mobile hamburger dropdown
+│   ├── TickingClock.tsx     # Animated overlay on session start (2.5s fade-out)
+│   └── MilestoneConfetti.tsx # 8-particle burst at 60-min milestone (fires once per session)
 ├── contexts/
 │   └── AuthContext.tsx      # Auth + multi-team state; syncs profiles.full_name on login
 ├── database/
@@ -403,6 +406,76 @@ interface AuthContextType {
 - [ ] Pagination on `getAllSessions` (currently returns all rows)
 - [ ] Reduce storage query waterfall: `getActiveTeamId()` + `getTeamProjectIds()` are separate round-trips
 - [ ] `stats.tsx` donut chart broken on web — `react-native-svg` doesn't resolve via Metro on web (fix: platform-specific `DonutChart.web.tsx` using native `<svg>`)
+
+---
+
+## 12. Deployment
+
+### Vercel Setup
+- App is deployed to Vercel via GitHub repo `cheloman04/clockea_v1`
+- Local code also pushed to `cheloman04/Clockea` (source of truth)
+- Two git remotes configured:
+  ```
+  origin  → https://github.com/cheloman04/Clockea.git       (source)
+  vercel  → https://github.com/cheloman04/clockea_v1.git    (Vercel watches this)
+  ```
+- Deploy command: `git push origin main && git push vercel main`
+- `.npmrc` contains `legacy-peer-deps=true` to fix Vercel `npm install` peer-dep failures
+- `vercel.json`: `buildCommand: "npm install --legacy-peer-deps && npx expo export --platform web"`, `outputDirectory: "dist"`, SPA rewrites
+
+---
+
+## 14. Changes — Mar 10–11 2026 (UX Polish + Navbar)
+
+### New Components
+- **`components/Navbar.tsx`** — Responsive navbar (replaces Stack header on main screens)
+  - Desktop/Tablet ≥768px: 3-column flex layout `[CLOCKEAPP] [Analytics · Logs] [Profile]`
+  - Mobile <768px: brand + hamburger `☰/✕`, dropdown (Profile → Analytics → Logs)
+  - `useWindowDimensions` for breakpoint, `useSafeAreaInsets` for top padding
+  - Active route highlighted via `useSegments`
+  - Integrated in: `index`, `stats`, `history`, `profile` — all set `headerShown: false`
+- **`components/TickingClock.tsx`** — Semi-transparent overlay with pulsing ring + animated clock hands; shows for 2.5s on session start, then fades out
+- **`components/MilestoneConfetti.tsx`** — 8 colored particles burst outward at 60-minute session mark; fires once per session; 650ms, non-blocking
+
+### New Utils
+- **`utils/sounds.ts`** — Web Audio API sounds (no packages)
+  - `playClockInSound()` — 880Hz triangle wave, 150ms
+  - `playClockOutSound()` — 440Hz triangle wave, 120ms
+  - Silent no-op on native; must be called **before** first `await` to satisfy browser gesture policy
+
+### UX Micro-interactions
+- **Press depth animation** on Clock In (dashboard) and Clock Out (working) buttons: scale 0.96 on press-in, back to 1 on release (120–150ms)
+- **Skeleton loading** on dashboard: hero + 4 session rows shimmer (opacity 0.3→0.7 loop) while Supabase data loads; `loading` state in `useFocusEffect`
+
+### Bug Fixes
+- **Break timer not pausing on dashboard**: `index.tsx` elapsed timer now subtracts both `total_break_seconds` (past breaks) and ongoing `break_start` duration → display freezes while on break
+- **Sound not firing in browser**: Moved `playClockInSound()` before first `await clockIn()` so AudioContext is created within the user-gesture frame
+
+### App Name
+- Renamed from **Clockea** → **CLOCKEAPP** in all visible UI (Navbar brand, `_layout.tsx` header removed)
+
+---
+
+## 13. Changes Since Initial Deploy (Mar 2026)
+
+### UI / UX
+- **Session logs show date**: `SessionItem` now displays `formatDate · time – time` (e.g. `Today · 10:37 PM – 10:38 PM` or `Mar 9, 2026 · ...`)
+- **Dashboard always shows 4 slots**: Both "Your Sessions" and "Team Sessions" tabs always render 4 rows; empty slots show `"Your Next Session"` placeholder in muted italic
+- **"View more →" always visible**: Previously only shown when >4 sessions; now always shown
+- **Login logo replaced**: Custom `assets/clock-logo.png` (180×180, no background) replaces the hand-drawn SVG clock illustration on login screen
+
+### Bug Fixes
+- **`formatDate` timezone fix**: Replaced `toDateString()` comparison with explicit `getFullYear()/getMonth()/getDate()` — prevents UTC/local mismatch from labeling yesterday's sessions as "Today". "Yesterday" label removed; non-today dates show actual date string.
+- **Admin flush buttons (web)**: `Alert.alert` is a no-op on web browsers — confirmation dialog never showed. Fixed with `window.confirm` / `window.alert` on web, `Alert.alert` on native (same pattern as `handleClockOut`).
+- **Clock out on mobile web**: Fixed by patching `getActiveSession` (`.order + .limit(1)` before `.maybeSingle()`) and cleaning up orphaned sessions on `clockIn`. Deployed via `git push vercel main`.
+
+### Supabase
+- **`admin_flush_sessions` function**: Updated signature from `p_period TEXT` to `p_cutoff TIMESTAMPTZ`. Client now computes local-timezone midnight and passes it as ISO string — fixes timezone bug where Florida (UTC-4/5) sessions weren't matched by server-side `date_trunc('day', NOW())`.
+  ```sql
+  CREATE OR REPLACE FUNCTION admin_flush_sessions(p_cutoff TIMESTAMPTZ, p_team_id UUID)
+  RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+  AS $$ ... DELETE FROM sessions WHERE project_id IN (...) AND start_time >= p_cutoff ... $$;
+  ```
 
 ---
 

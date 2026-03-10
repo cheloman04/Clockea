@@ -3,6 +3,7 @@ import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { G, Path, Svg, Text as SvgText } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Navbar from '../components/Navbar';
 import { getSessionsInRange } from '../database/storage';
 import { useAuth } from '../contexts/AuthContext';
 import { formatMinutes } from '../utils/time';
@@ -148,6 +149,7 @@ export default function StatsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
+      <Navbar />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Period selector */}

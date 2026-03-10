@@ -2,7 +2,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Navbar from '../components/Navbar';
 import SessionItem from '../components/SessionItem';
 import {
   getActiveSession,
@@ -40,17 +40,37 @@ export default function HomeScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('mine');
   const [liveTeam, setLiveTeam] = useState<Session[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  const [loading, setLoading] = useState(true);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const shimmerAnim = useRef(new Animated.Value(0.3)).current;
+  const clockPressAnim = useRef(new Animated.Value(1)).current;
+
+  // Shimmer loop for skeleton
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmerAnim, { toValue: 0.7, duration: 700, useNativeDriver: true }),
+        Animated.timing(shimmerAnim, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
+      setLoading(true);
       async function load() {
-        const active = await getActiveSession();
-        setActiveSession(active);
-        setTodayMinutes(await getTodayTotalMinutes());
-        setTodaySessions(await getTodaySessions());
-        const all = await getActiveSessions();
-        setLiveTeam(all.filter((s) => s.user_id !== user?.id));
+        try {
+          const active = await getActiveSession();
+          setActiveSession(active);
+          setTodayMinutes(await getTodayTotalMinutes());
+          setTodaySessions(await getTodaySessions());
+          const all = await getActiveSessions();
+          setLiveTeam(all.filter((s) => s.user_id !== user?.id));
+        } finally {
+          setLoading(false);
+        }
       }
       load();
     }, [user])
@@ -70,9 +90,12 @@ export default function HomeScreen() {
       return;
     }
     const startMs = new Date(activeSession.start_time).getTime();
-    const breakSecs = activeSession.total_break_seconds ?? 0;
     const tick = () => {
-      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startMs) / 1000) - breakSecs));
+      const pastBreaks = activeSession.total_break_seconds ?? 0;
+      const currentBreak = activeSession.break_start
+        ? Math.floor((Date.now() - new Date(activeSession.break_start).getTime()) / 1000)
+        : 0;
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startMs) / 1000) - pastBreaks - currentBreak));
     };
     tick();
     const interval = setInterval(tick, 1000);
@@ -89,6 +112,19 @@ export default function HomeScreen() {
     } else {
       router.push('/clock-in');
     }
+  }
+
+  function SkeletonRow() {
+    return (
+      <Animated.View style={[styles.skelRow, { opacity: shimmerAnim }]}>
+        <View style={styles.skelDot} />
+        <View style={styles.skelInfo}>
+          <View style={styles.skelLineLong} />
+          <View style={styles.skelLineShort} />
+        </View>
+        <View style={styles.skelDuration} />
+      </Animated.View>
+    );
   }
 
   const mySessions = todaySessions.filter((s) => s.user_id === user?.id);
@@ -111,12 +147,19 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
+      <Navbar />
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero — context-aware */}
-        {activeSession ? (
+        {loading ? (
+          <Animated.View style={[styles.hero, styles.skelHero, { opacity: shimmerAnim }]}>
+            <View style={styles.skelHeroLine1} />
+            <View style={styles.skelHeroLine2} />
+            <View style={styles.skelHeroLine3} />
+          </Animated.View>
+        ) : activeSession ? (
           <View style={[styles.hero, styles.heroActive]}>
             <Text style={styles.heroActiveLabel}>Currently working on</Text>
             <Text style={styles.heroActiveProject}>{activeSession.project_name ?? 'Unknown'}</Text>
@@ -236,7 +279,11 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {activeTab === 'mine' ? (
+          {loading ? (
+            <>
+              {[0, 1, 2, 3].map((i) => <SkeletonRow key={i} />)}
+            </>
+          ) : activeTab === 'mine' ? (
             <>
               {Array.from({ length: 4 }, (_, i) => {
                 const item = mySessions[i];
@@ -295,17 +342,19 @@ export default function HomeScreen() {
 
       {/* Fixed bottom action bar */}
       <View style={styles.bottomBar}>
-        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+        <Animated.View style={{ transform: [{ scale: Animated.multiply(pulseAnim, clockPressAnim) }] }}>
           <TouchableOpacity
             style={[styles.clockBtn, activeSession && styles.clockBtnActive]}
             onPress={handleClockPress}
+            onPressIn={() => Animated.timing(clockPressAnim, { toValue: 0.96, duration: 120, useNativeDriver: true }).start()}
+            onPressOut={() => Animated.timing(clockPressAnim, { toValue: 1, duration: 150, useNativeDriver: true }).start()}
             activeOpacity={0.9}
           >
-            <Image
-              source={require('../assets/clock-logo.png')}
-              style={styles.clockLogo}
-              resizeMode="contain"
-            />
+            <View style={styles.clockIconRing}>
+              <View style={styles.clockHandH} />
+              <View style={styles.clockHandM} />
+              <View style={styles.clockCenter} />
+            </View>
             <Text style={styles.clockBtnText}>
               {activeSession ? 'Clock Out' : 'Clock In'}
             </Text>
@@ -637,6 +686,69 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  // Skeleton styles
+  skelHero: {
+    gap: 10,
+    alignItems: 'flex-start',
+    paddingVertical: 24,
+  },
+  skelHeroLine1: {
+    width: '75%',
+    height: 22,
+    borderRadius: 6,
+    backgroundColor: '#2d4f62',
+  },
+  skelHeroLine2: {
+    width: '35%',
+    height: 14,
+    borderRadius: 6,
+    backgroundColor: '#2d4f62',
+  },
+  skelHeroLine3: {
+    width: '25%',
+    height: 40,
+    borderRadius: 6,
+    backgroundColor: '#2d4f62',
+    marginTop: 4,
+  },
+  skelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d4f62',
+    gap: 14,
+  },
+  skelDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2d4f62',
+  },
+  skelInfo: {
+    flex: 1,
+    gap: 6,
+  },
+  skelLineLong: {
+    height: 13,
+    borderRadius: 5,
+    backgroundColor: '#2d4f62',
+    width: '65%',
+  },
+  skelLineShort: {
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#2d4f62',
+    width: '40%',
+  },
+  skelDuration: {
+    width: 36,
+    height: 13,
+    borderRadius: 5,
+    backgroundColor: '#2d4f62',
+  },
+
   analyticsBtn: {
     marginTop: 12,
     backgroundColor: '#fe7f2d',
@@ -685,9 +797,45 @@ const styles = StyleSheet.create({
   clockBtnActive: {
     backgroundColor: '#e05a1a',
   },
-  clockLogo: {
-    width: 28,
-    height: 28,
+  clockIconRing: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  clockHandH: {
+    position: 'absolute',
+    width: 1.5,
+    height: 6,
+    backgroundColor: '#ffffff',
+    borderRadius: 1,
+    bottom: '50%',
+    left: '50%',
+    marginLeft: -0.75,
+    transformOrigin: 'bottom',
+    transform: [{ rotate: '-30deg' }],
+  },
+  clockHandM: {
+    position: 'absolute',
+    width: 1.5,
+    height: 7,
+    backgroundColor: '#ffffff',
+    borderRadius: 1,
+    bottom: '50%',
+    left: '50%',
+    marginLeft: -0.75,
+    transformOrigin: 'bottom',
+    transform: [{ rotate: '60deg' }],
+  },
+  clockCenter: {
+    width: 2.5,
+    height: 2.5,
+    borderRadius: 1.25,
+    backgroundColor: '#ffffff',
   },
   clockBtnText: {
     color: '#ffffff',

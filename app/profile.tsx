@@ -3,6 +3,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
+import Navbar from '../components/Navbar';
 import { supabase } from '../lib/supabase';
 
 
@@ -14,12 +15,19 @@ export default function ProfileScreen() {
   const [error, setError] = useState('');
   const [joining, setJoining] = useState(false);
   const [teamMembers, setTeamMembers] = useState<Array<{ id: string; full_name: string }>>([]);
+  const [teamNameEdit, setTeamNameEdit] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   // Derive active team info from AuthContext
   const activeTeam = userTeams.find((t) => t.id === activeTeamId) ?? null;
   const role = activeTeam
     ? activeTeam.created_by === user?.id ? 'Admin' : 'Participant'
     : 'No Team';
+
+  // Keep rename input in sync with active team
+  React.useEffect(() => {
+    setTeamNameEdit(activeTeam?.name ?? '');
+  }, [activeTeam?.name]);
 
   const loadProfile = useCallback(async () => {
     if (!user) return;
@@ -105,6 +113,51 @@ export default function ProfileScreen() {
     return d.toISOString();
   }
 
+  async function handleRenameTeam() {
+    if (!activeTeamId || !teamNameEdit.trim()) return;
+    setSavingName(true);
+    const { error } = await supabase
+      .from('teams')
+      .update({ name: teamNameEdit.trim() })
+      .eq('id', activeTeamId)
+      .eq('created_by', user!.id);
+    setSavingName(false);
+    if (error) {
+      if (Platform.OS === 'web') window.alert(`Error: ${error.message}`);
+      else Alert.alert('Error', error.message);
+    } else {
+      if (Platform.OS === 'web') window.location.reload();
+      else router.replace('/');
+    }
+  }
+
+  async function handleDeleteTeam() {
+    if (!activeTeamId) return;
+    const confirmMsg = `Delete team "${activeTeam?.name}"?\n\nThis will remove the team and all its data permanently. This cannot be undone.`;
+    const doDelete = async () => {
+      const { error } = await supabase
+        .from('teams')
+        .delete()
+        .eq('id', activeTeamId)
+        .eq('created_by', user!.id);
+      if (error) {
+        if (Platform.OS === 'web') window.alert(`Error: ${error.message}`);
+        else Alert.alert('Error', error.message);
+      } else {
+        if (Platform.OS === 'web') window.location.reload();
+        else router.replace('/');
+      }
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMsg)) doDelete();
+    } else {
+      Alert.alert('Delete Team', confirmMsg, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: doDelete },
+      ]);
+    }
+  }
+
   async function handleFlush(period: 'day' | 'week' | 'month' | 'all') {
     if (!activeTeamId) return;
     const periodLabel = { day: 'today', week: 'this week', month: 'this month', all: 'ALL TIME' }[period];
@@ -149,7 +202,8 @@ export default function ProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <Navbar />
       <ScrollView style={styles.inner} contentContainerStyle={{ paddingBottom: 32 }}>
         <View style={styles.hero}>
           <View style={styles.avatar}>
@@ -277,6 +331,39 @@ export default function ProfileScreen() {
         {/* Admin: Session Log Management */}
         {role === 'Admin' && activeTeamId && (
           <View style={styles.adminCard}>
+            <Text style={styles.adminCardTitle}>Team Management</Text>
+
+            {/* Rename team */}
+            <Text style={styles.label}>Team Name</Text>
+            <View style={styles.renameRow}>
+              <TextInput
+                style={styles.renameInput}
+                value={teamNameEdit}
+                onChangeText={setTeamNameEdit}
+                placeholder="Team name"
+                placeholderTextColor="#4a6d80"
+                autoCapitalize="words"
+              />
+              <TouchableOpacity
+                style={[styles.renameBtn, (savingName || !teamNameEdit.trim() || teamNameEdit.trim() === activeTeam?.name) && styles.btnDisabled]}
+                onPress={handleRenameTeam}
+                disabled={savingName || !teamNameEdit.trim() || teamNameEdit.trim() === activeTeam?.name}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.renameBtnText}>{savingName ? '…' : 'Save'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Delete team */}
+            <TouchableOpacity
+              style={styles.deleteTeamBtn}
+              onPress={handleDeleteTeam}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.deleteTeamBtnText}>Delete Team</Text>
+            </TouchableOpacity>
+
+            <View style={styles.adminDivider} />
             <Text style={styles.adminCardTitle}>Session Log Management</Text>
             <Text style={styles.adminCardHint}>
               Permanently deletes session records for this team. Admin only.
@@ -568,6 +655,53 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  renameRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  renameInput: {
+    flex: 1,
+    backgroundColor: '#1e3545',
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#ffffff',
+  },
+  renameBtn: {
+    backgroundColor: '#fe7f2d',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  renameBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  deleteTeamBtn: {
+    backgroundColor: '#EF444415',
+    borderWidth: 1,
+    borderColor: '#EF444455',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  deleteTeamBtnText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  adminDivider: {
+    height: 1,
+    backgroundColor: '#2d4f62',
+    marginVertical: 16,
+  },
   // Admin flush card
   adminCard: {
     marginTop: 16,

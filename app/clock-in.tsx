@@ -21,6 +21,7 @@ import {
   updateProject,
 } from '../database/storage';
 import { Project } from '../database/types';
+import { playClockInSound } from '../utils/sounds';
 
 const PALETTE = ['#fe7f2d', '#e91e63', '#4caf50', '#00bcd4', '#9c27b0', '#ffb300'];
 
@@ -92,6 +93,7 @@ export default function ClockInScreen() {
   async function handleStart() {
     if (!selectedProject) return;
     try {
+      playClockInSound();
       const sessionId = await clockIn(selectedProject.id);
       if (items.length > 0) {
         await createSessionObjectives(sessionId, items);
@@ -106,6 +108,7 @@ export default function ClockInScreen() {
   async function handleSkipObjectives() {
     if (!selectedProject) return;
     try {
+      playClockInSound();
       await clockIn(selectedProject.id);
       router.replace('/working');
     } catch (e) {

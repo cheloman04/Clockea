@@ -1,7 +1,8 @@
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   Platform,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import MilestoneConfetti from '../components/MilestoneConfetti';
+import TickingClock from '../components/TickingClock';
 import Timer from '../components/Timer';
 import {
   clockOut,
@@ -20,11 +23,16 @@ import {
   toggleObjectiveComplete,
 } from '../database/storage';
 import { Session, SessionObjective } from '../database/types';
+import { playClockOutSound } from '../utils/sounds';
 
 export default function WorkingScreen() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [objectives, setObjectives] = useState<SessionObjective[]>([]);
+  const [showClock, setShowClock] = useState(true);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const milestone60Fired = useRef(false);
+  const clockOutPressAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     getActiveSession().then((active) => {
@@ -41,6 +49,26 @@ export default function WorkingScreen() {
     const active = await getActiveSession();
     if (active) setSession(active);
   }
+
+  // 60-minute milestone confetti — fires once per session
+  useEffect(() => {
+    if (!session || milestone60Fired.current) return;
+    const startMs = new Date(session.start_time).getTime();
+    const interval = setInterval(() => {
+      const pastBreaks = session.total_break_seconds ?? 0;
+      const currentBreak = session.break_start
+        ? Math.floor((Date.now() - new Date(session.break_start).getTime()) / 1000)
+        : 0;
+      const elapsed = Math.floor((Date.now() - startMs) / 1000) - pastBreaks - currentBreak;
+      if (elapsed >= 3600) {
+        milestone60Fired.current = true;
+        setShowConfetti(true);
+        clearInterval(interval);
+        setTimeout(() => setShowConfetti(false), 800);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [session]);
 
   async function handleBreak() {
     if (!session) return;
@@ -84,6 +112,7 @@ export default function WorkingScreen() {
     const doClockOut = async () => {
       if (session) {
         try {
+          playClockOutSound();
           await clockOut(session.id);
           router.replace({
             pathname: '/session-recap',
@@ -117,6 +146,8 @@ export default function WorkingScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <TickingClock visible={showClock} onDone={() => setShowClock(false)} />
+      <MilestoneConfetti visible={showConfetti} />
       {/* Top bar: back + project badge */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => router.replace('/')} activeOpacity={0.7}>
@@ -215,13 +246,17 @@ export default function WorkingScreen() {
           </TouchableOpacity>
         )}
 
+        <Animated.View style={{ transform: [{ scale: clockOutPressAnim }] }}>
         <TouchableOpacity
           style={styles.clockOutBtn}
           onPress={handleClockOut}
+          onPressIn={() => Animated.timing(clockOutPressAnim, { toValue: 0.96, duration: 120, useNativeDriver: true }).start()}
+          onPressOut={() => Animated.timing(clockOutPressAnim, { toValue: 1, duration: 150, useNativeDriver: true }).start()}
           activeOpacity={0.85}
         >
           <Text style={styles.clockOutText}>Clock Out</Text>
         </TouchableOpacity>
+        </Animated.View>
       </View>
     </SafeAreaView>
   );
