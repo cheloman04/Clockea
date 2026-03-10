@@ -1,6 +1,6 @@
 # TimeTracker — Project Progress & Context Document
 
-> Last updated: 2026-03-11
+> Last updated: 2026-03-12
 > Purpose: Full context for continuing development across sessions/chats.
 > Audience: Internal tool — personal use only (single user + invited teammates).
 
@@ -420,11 +420,15 @@ Multi-step flow with modes: `combos | client | project | activity | objective | 
 - Own sessions show `⋯` → Edit Notes / Delete
 
 ### `stats.tsx`
-- Period selector: Today / This Week / This Month
-- **My Sessions** donut chart + legend
-- **Team Sessions** donut chart + legend
-- **By Client** horizontal bar list (all team sessions)
-- **By Activity** horizontal bar list (all team sessions)
+- **Search bar** — text input at top; filters all charts/metrics reactively (matches project, client, activity name, or session notes)
+- **Period selector** — Today / This Week / This Month
+- **Overview metrics row** — 4 cards: Total Time, Sessions, Avg Session, Projects (personal, period-scoped)
+- **Work Distribution card** — donut chart (my sessions) with `Project | Client | Activity` dimension toggle
+- **Last 7 Days trend** — View-based bar chart, no SVG; Today highlighted in orange
+- **Top Projects** — horizontal bar list, top 5 (all team sessions)
+- **By Client** — horizontal bar list (all team sessions)
+- **By Activity** — horizontal bar list (all team sessions)
+- All aggregations via `useMemo`; search + dimension changes never trigger a new network request
 - Fixed bottom Clock In button
 
 ### `profile.tsx`
@@ -564,6 +568,43 @@ Replaced single project-list screen with multi-step picker:
 - Added **By Client** horizontal bar chart (all team sessions)
 - Added **By Activity** horizontal bar chart (all team sessions)
 - Both use `HorizontalBarList` component with color dot + name + duration + fill bar
+
+**Further rewritten Mar 12, 2026 — see section 15.**
+
+---
+
+## 15. Changes — Mar 12, 2026 (Analytics Dashboard Upgrade)
+
+### `app/stats.tsx` — Full rewrite
+
+**Architecture:**
+- Single `allSessions` state loaded once per period; all derived data via `useMemo`
+- `applySearch(sessions, query)` — composable text filter (project, client, activity name, notes)
+- `buildStats(sessions, dimension)` — unified aggregation replacing separate `buildProjectStats` / `buildClientStats` / `buildActivityStats`; groups by `'project' | 'client' | 'activity'`
+- `buildDailyTrend(sessions)` — groups my sessions by day for the last 7 days
+
+**New UI sections:**
+- **Search bar** — live text filter; all charts + metrics update via `useMemo`, no re-fetch
+- **Overview metrics row** — `MetricCard` component; 4 KPIs: Total Time, Sessions, Avg Session, Projects
+- **Work Distribution card** — donut chart with `Project | Client | Activity` toggle (`Dimension` type)
+- **Last 7 Days trend** — `DailyTrendChart` component using `View`-based bars (no SVG; web-safe)
+- **Top Projects** — `HorizontalBarList` limited to 5 rows
+- **By Client** and **By Activity** panels kept, now share same `buildStats()` function
+
+**Key types:**
+```ts
+type Dimension = 'project' | 'client' | 'activity';
+interface Stat { key: string; name: string; color: string; total_minutes: number; percentage: number; }
+interface DayTrend { label: string; minutes: number; }
+```
+
+**Reactive derivation chain:**
+```
+allSessions + searchQuery → filtered
+filtered + user.id       → mySessions (for donut + metrics + trend)
+filtered                 → projectBreakdown, clientBreakdown, activityBreakdown (team-wide)
+mySessions + dimension   → donutStats
+```
 
 ---
 
