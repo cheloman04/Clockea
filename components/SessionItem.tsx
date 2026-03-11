@@ -115,16 +115,24 @@ function SessionItem({ session, hideMember, prominentMember, onActions, onResume
           {hasIntervals && (
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>Work Periods</Text>
-              {intervals!.map((iv, i) => (
-                <View key={iv.id} style={styles.intervalRow}>
-                  <View style={styles.intervalDot} />
-                  <Text style={styles.intervalText}>
-                    <Text style={styles.intervalIndex}>#{i + 1}  </Text>
-                    {formatDate(iv.start_time)}  {formatTime(iv.start_time)}
-                    {iv.end_time ? ` – ${formatTime(iv.end_time)}` : '  · ongoing'}
-                  </Text>
-                </View>
-              ))}
+              {intervals!.map((iv, i) => {
+                const mins = iv.end_time
+                  ? Math.round((new Date(iv.end_time).getTime() - new Date(iv.start_time).getTime()) / 60000)
+                  : null;
+                return (
+                  <View key={iv.id} style={styles.intervalRow}>
+                    <View style={styles.intervalDot} />
+                    <Text style={styles.intervalText}>
+                      <Text style={styles.intervalIndex}>#{i + 1}  </Text>
+                      {formatDate(iv.start_time)}  {formatTime(iv.start_time)}
+                      {iv.end_time ? ` – ${formatTime(iv.end_time)}` : '  · ongoing'}
+                    </Text>
+                    {mins != null && (
+                      <Text style={styles.intervalDuration}>{formatMinutes(mins)}</Text>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           )}
 
@@ -315,6 +323,12 @@ const styles = StyleSheet.create({
   intervalIndex: {
     color: '#4a6d80',
     fontWeight: '700',
+  },
+  intervalDuration: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fe7f2d',
+    marginLeft: 'auto',
   },
   resumeBtn: {
     marginTop: 4,
