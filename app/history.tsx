@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, SectionList, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionItem from '../components/SessionItem';
 import Navbar from '../components/Navbar';
@@ -57,16 +57,27 @@ export default function HistoryScreen() {
       await resumeSession(session.id, breakSeconds);
       router.replace('/working');
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not resume session.');
+      const msg = e instanceof Error ? e.message : 'Could not resume session.';
+      if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Error', msg); }
     }
   }
 
   function handleActions(session: Session) {
-    const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [
-      {
-        text: 'Resume Session',
-        onPress: () => handleResume(session),
-      },
+    if (Platform.OS === 'web') {
+      // Alert.alert with multiple buttons is not supported on web
+      const choice = window.prompt(
+        `${session.project_name ?? 'Session'}\n\n1 – Edit Notes\n2 – Delete Session\n\nType a number:`,
+      );
+      if (choice === '1') {
+        router.push({ pathname: '/edit-session', params: { id: String(session.id), notes: session.notes ?? '' } });
+      } else if (choice === '2') {
+        if (window.confirm(`Delete this ${session.project_name ?? 'session'}? This cannot be undone.`)) {
+          deleteSession(session.id).then(load);
+        }
+      }
+      return;
+    }
+    Alert.alert(session.project_name ?? 'Session', undefined, [
       {
         text: 'Edit Notes',
         onPress: () =>
@@ -87,17 +98,13 @@ export default function HistoryScreen() {
               {
                 text: 'Delete',
                 style: 'destructive',
-                onPress: async () => {
-                  await deleteSession(session.id);
-                  load();
-                },
+                onPress: async () => { await deleteSession(session.id); load(); },
               },
             ]
           ),
       },
       { text: 'Cancel', style: 'cancel' },
-    ];
-    Alert.alert(session.project_name ?? 'Session', undefined, options);
+    ]);
   }
 
   if (sections.length === 0) {
@@ -120,6 +127,7 @@ export default function HistoryScreen() {
             objectives={objectivesMap[item.id]}
             intervals={intervalsMap[item.id]}
             onActions={item.user_id === user?.id ? () => handleActions(item) : undefined}
+            onResume={item.user_id === user?.id && !!item.end_time ? () => handleResume(item) : undefined}
           />
         )}
         renderSectionHeader={({ section }) => (
