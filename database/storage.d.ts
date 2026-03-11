@@ -30,6 +30,7 @@ export function resumeSession(sessionId: number, breakSeconds: number): Promise<
 export function startBreak(sessionId: number): Promise<void>;
 export function endBreak(sessionId: number): Promise<void>;
 export function getTodaySessions(): Promise<Session[]>;
+export function getRecentSessions(limit?: number): Promise<Session[]>;
 export function getAllSessions(): Promise<Session[]>;
 export function getActiveSessions(): Promise<Session[]>;
 export function getTodayTotalMinutes(): Promise<number>;

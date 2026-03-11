@@ -16,6 +16,7 @@ import SessionItem from '../components/SessionItem';
 import {
   getActiveSession,
   getActiveSessions,
+  getRecentSessions,
   getTodaySessions,
   getTodayTotalMinutes,
   resumeSession,
@@ -38,6 +39,7 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [todaySessions, setTodaySessions] = useState<Session[]>([]);
+  const [recentSessions, setRecentSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>('mine');
@@ -68,11 +70,13 @@ export default function HomeScreen() {
         getTodayTotalMinutes(),
         getTodaySessions(),
         getActiveSessions(),
-      ]).then(([active, minutes, sessions, all]) => {
+        getRecentSessions(4),
+      ]).then(([active, minutes, sessions, all, recent]) => {
         setActiveSession(active);
         setTodayMinutes(minutes);
         setTodaySessions(sessions);
         setLiveTeam(all.filter((s) => s.user_id !== user?.id));
+        setRecentSessions(recent);
       }).finally(() => setLoading(false));
     }, [user])
   );
@@ -324,7 +328,7 @@ export default function HomeScreen() {
           ) : activeTab === 'mine' ? (
             <>
               {Array.from({ length: 4 }, (_, i) => {
-                const item = mySessions[i];
+                const item = recentSessions[i];
                 return item ? (
                   <SessionItem
                     key={item.id}

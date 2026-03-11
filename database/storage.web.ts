@@ -323,6 +323,22 @@ export async function getTodaySessions(): Promise<Session[]> {
   return (await enrichWithUserNames(enriched)) as Session[];
 }
 
+export async function getRecentSessions(limit = 4): Promise<Session[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data, error } = await supabase
+    .from('sessions')
+    .select(SESSION_SELECT)
+    .eq('user_id', user.id)
+    .not('end_time', 'is', null)
+    .order('start_time', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('[getRecentSessions] query error', error); return []; }
+  if (!data) return [];
+  const raw = (data as any[]).map(mapSession);
+  return (await enrichWithClientActivity(raw)) as Session[];
+}
+
 export async function getAllSessions(): Promise<Session[]> {
   const teamId = await getActiveTeamId();
   if (!teamId) { console.error('[getAllSessions] no active teamId'); return []; }
