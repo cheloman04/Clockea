@@ -60,7 +60,7 @@ export default function LoginScreen() {
 
           <View style={styles.top}>
             <ClockLogo />
-            <Text style={styles.logo}>CLOCKEA</Text>
+            <Text style={styles.logo}>CLOKEAPP</Text>
             <Text style={styles.heading}>Welcome back</Text>
             <Text style={styles.sub}>Sign in to continue tracking</Text>
           </View>
