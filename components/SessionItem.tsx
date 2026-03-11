@@ -20,7 +20,7 @@ function SessionItem({ session, hideMember, prominentMember, onActions, onResume
   const hasNotes     = !!session.notes?.trim();
   const hasObjective = !!session.objective?.trim();
   const hasChecklist = !!objectives && objectives.length > 0;
-  const hasIntervals = !!intervals && intervals.length > 1; // only show log when session was resumed
+  const hasIntervals = !!intervals && intervals.length > 0;
   const hasExpanded  = hasNotes || hasObjective || hasChecklist || hasIntervals || !!onResume;
 
   return (
