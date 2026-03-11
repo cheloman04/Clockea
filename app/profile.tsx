@@ -54,12 +54,16 @@ export default function ProfileScreen() {
   const loadProfile = useCallback(async () => {
     if (!user) return;
 
-    // Fetch profile, teammate IDs, clients, and activities in parallel
-    const [{ data: profile }, { data: ids }] = await Promise.all([
+    // Fetch profile, teammate IDs, clients, and activity types all in parallel
+    const [{ data: profile }, { data: ids }, clientsList, activitiesList] = await Promise.all([
       supabase.from('profiles').select('full_name').eq('id', user.id).single(),
       supabase.rpc('get_teammate_ids', { p_user_id: user.id }),
+      getClients().catch(() => [] as Client[]),
+      getActivityTypes().catch(() => [] as ActivityType[]),
     ]);
     setFullName(profile?.full_name || user.user_metadata?.full_name || '');
+    setClients(clientsList);
+    setActivities(activitiesList);
 
     if (ids && (ids as string[]).length > 0) {
       const { data: members } = await supabase
@@ -70,10 +74,6 @@ export default function ProfileScreen() {
     } else {
       setTeamMembers([]);
     }
-
-    // Load clients and activity types concurrently
-    getClients().then(setClients).catch(() => {});
-    getActivityTypes().then(setActivities).catch(() => {});
   }, [user]);
 
   useFocusEffect(
