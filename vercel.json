@@ -1,12 +1,8 @@
 {
-  "buildCommand": "npm install --legacy-peer-deps && npx expo export --platform web",
+  "buildCommand": "npx expo export --platform web",
   "outputDirectory": "dist",
   "framework": null,
-  "cleanUrls": true,
   "rewrites": [
-    {
-      "source": "/((?!_expo|assets|favicon\\.ico|favicon\\.png|manifest\\.json).*)",
-      "destination": "/index.html"
-    }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
