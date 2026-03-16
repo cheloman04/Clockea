@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, Platform, SectionList, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, SectionList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionItem from '../components/SessionItem';
 import Navbar from '../components/Navbar';
@@ -41,6 +41,8 @@ export default function HistoryScreen() {
   const [sections, setSections] = useState<DaySection[]>([]);
   const [objectivesMap, setObjectivesMap] = useState<Record<number, SessionObjective[]>>({});
   const [intervalsMap, setIntervalsMap] = useState<Record<number, SessionInterval[]>>({});
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const load = useCallback(() => {
     getAllSessions().then(async (sessions) => {
@@ -64,15 +66,13 @@ export default function HistoryScreen() {
       router.replace('/working');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Could not resume session.';
-      if (Platform.OS === 'web') {
-        window.alert(msg);
-      } else {
-        Alert.alert('Error', msg);
-      }
+      Alert.alert('Error', msg);
     }
   }
 
   function openEditSession(session: Session) {
+    setSelectedSession(null);
+    setConfirmingDelete(false);
     router.push({
       pathname: '/edit-session',
       params: {
@@ -85,47 +85,25 @@ export default function HistoryScreen() {
   }
 
   function handleActions(session: Session) {
-    if (Platform.OS === 'web') {
-      const choice = window.prompt(
-        `${session.project_name ?? 'Session'}\n\n1 - Edit Session\n2 - Delete Session\n\nType a number:`
-      );
-      if (choice === '1') {
-        openEditSession(session);
-      } else if (choice === '2') {
-        if (window.confirm(`Delete this ${session.project_name ?? 'session'}? This cannot be undone.`)) {
-          deleteSession(session.id).then(load);
-        }
-      }
-      return;
-    }
+    setSelectedSession(session);
+    setConfirmingDelete(false);
+  }
 
-    Alert.alert(session.project_name ?? 'Session', undefined, [
-      {
-        text: 'Edit Session',
-        onPress: () => openEditSession(session),
-      },
-      {
-        text: 'Delete Session',
-        style: 'destructive',
-        onPress: () =>
-          Alert.alert(
-            'Delete Session',
-            `Delete this ${session.project_name ?? 'session'}? This cannot be undone.`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                  await deleteSession(session.id);
-                  load();
-                },
-              },
-            ]
-          ),
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  function closeActionsModal() {
+    setSelectedSession(null);
+    setConfirmingDelete(false);
+  }
+
+  async function handleDeleteSelectedSession() {
+    if (!selectedSession) return;
+    try {
+      await deleteSession(selectedSession.id);
+      closeActionsModal();
+      load();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not delete session.';
+      Alert.alert('Error', message);
+    }
   }
 
   if (sections.length === 0) {
@@ -160,6 +138,72 @@ export default function HistoryScreen() {
         stickySectionHeadersEnabled
         contentContainerStyle={styles.list}
       />
+
+      <Modal
+        visible={!!selectedSession}
+        transparent
+        animationType="fade"
+        onRequestClose={closeActionsModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalEyebrow}>Session Actions</Text>
+            <Text style={styles.modalTitle}>{selectedSession?.project_name ?? 'Session'}</Text>
+            <Text style={styles.modalMeta}>
+              {selectedSession ? `${formatDate(selectedSession.start_time)} • ${formatMinutes(selectedSession.duration_minutes ?? 0)}` : ''}
+            </Text>
+
+            {confirmingDelete ? (
+              <>
+                <Text style={styles.modalBody}>
+                  Delete this session? This cannot be undone.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.deleteBtn]}
+                  onPress={handleDeleteSelectedSession}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.deleteBtnText}>Delete Session</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.secondaryBtn]}
+                  onPress={() => setConfirmingDelete(false)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.secondaryBtnText}>Back</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalBody}>
+                  Choose what you want to do with this completed session.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.primaryBtn]}
+                  onPress={() => selectedSession && openEditSession(selectedSession)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>Edit Session</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.ghostBtn]}
+                  onPress={() => setConfirmingDelete(true)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.ghostBtnText}>Delete Session</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.secondaryBtn]}
+                  onPress={closeActionsModal}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.secondaryBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -171,6 +215,106 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingBottom: 40,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 20, 28, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: '#233d4d',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    padding: 22,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.3,
+    shadowRadius: 28,
+    elevation: 12,
+  },
+  modalEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7aa3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 6,
+  },
+  modalMeta: {
+    fontSize: 13,
+    color: '#fe7f2d',
+    fontWeight: '600',
+    marginBottom: 14,
+  },
+  modalBody: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: '#a8c4d0',
+    marginBottom: 18,
+  },
+  modalBtn: {
+    borderRadius: 14,
+    alignItems: 'center',
+    paddingVertical: 15,
+    marginBottom: 10,
+  },
+  primaryBtn: {
+    backgroundColor: '#fe7f2d',
+    shadowColor: '#fe7f2d',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    elevation: 6,
+  },
+  primaryBtnText: {
+    color: '#1e3545',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  ghostBtn: {
+    backgroundColor: '#1e3545',
+    borderWidth: 1,
+    borderColor: '#EF444466',
+  },
+  ghostBtnText: {
+    color: '#EF7A7A',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  secondaryBtn: {
+    backgroundColor: '#1e3545',
+    borderWidth: 1,
+    borderColor: '#2d4f62',
+    marginBottom: 0,
+  },
+  secondaryBtnText: {
+    color: '#7aa3b8',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  deleteBtn: {
+    backgroundColor: '#EF4444',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  deleteBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
   },
   sectionHeader: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
 # TimeTracker — Project Progress & Context Document
 
-> Last updated: 2026-03-10
+> Last updated: 2026-03-16
 > Purpose: Full context for continuing development across sessions/chats.
 > Audience: Internal tool — personal use only (single user + invited teammates).
 
@@ -730,3 +730,45 @@ CREATE POLICY "session intervals owner" ON session_intervals
 - **`working.tsx`**: passes `endTime: String(Date.now())` to session-recap route params
 - **`components/SessionItem.tsx`**: new `intervals?` prop; shows **"Work Periods"** section in expanded view when `intervals.length > 1` (only for resumed sessions)
 - **`app/history.tsx`**: batch-loads intervals alongside objectives using `Promise.all`
+
+---
+
+## 18. Changes - Mar 16, 2026 (Auth Restore Hardening + Manual Session Time Editing)
+
+### Auth bootstrap hardening
+- `contexts/AuthContext.tsx` now uses a shared `syncAuthState()` flow for both initial `getSession()` restore and `onAuthStateChange`
+- If team/profile loading fails during restore, the app now logs the error, clears team state safely, and exits `loading` instead of hanging on a blank dark screen
+- `app/_layout.tsx` auth redirect effect now depends on `segments` and `router`, reducing stale-route redirect behavior
+- Removed unsupported native-stack header container props from `_layout.tsx` so TypeScript passes cleanly
+
+### Manual edit of completed sessions
+- `app/edit-session.tsx` was expanded from "notes only" to full completed-session editing
+- Users can now edit:
+  - start date
+  - start time
+  - end date
+  - end time
+  - notes
+- Validation rules:
+  - date format must be `YYYY-MM-DD`
+  - time format must be `HH:MM`
+  - end time must be after start time
+- Times are interpreted in the local timezone of the device doing the edit, then saved as ISO timestamps
+
+### Storage changes
+- Added `updateSessionDetails(sessionId, { startTime, endTime, notes })` in `database/storage.web.ts`
+- The function:
+  - verifies the user is authenticated
+  - verifies the session belongs to the current user
+  - updates `sessions.start_time`, `sessions.end_time`, `sessions.notes`
+  - clears `break_start` on save
+  - updates the first and last `session_intervals` rows so resumed-session history stays aligned with the edited session bounds
+- `duration_minutes` is still expected to be recalculated by the existing Postgres trigger
+
+### History flow changes
+- `app/history.tsx` action menu now opens "Edit Session" instead of the old notes-only edit flow
+- The history screen passes `startTime`, `endTime`, and `notes` route params into `edit-session`
+- Completed sessions still support delete and resume flows; editing is only intended for closed sessions in history
+
+### Verification
+- `npx.cmd tsc --noEmit` passes after these changes
