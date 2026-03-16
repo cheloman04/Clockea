@@ -418,6 +418,73 @@ export async function saveSessionNotes(sessionId: number, notes: string): Promis
   ensureNoError(error);
 }
 
+export async function updateSessionDetails(
+  sessionId: number,
+  updates: { startTime: string; endTime: string; notes: string }
+): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const startMs = new Date(updates.startTime).getTime();
+  const endMs = new Date(updates.endTime).getTime();
+
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    throw new Error('Invalid session time.');
+  }
+
+  if (endMs <= startMs) {
+    throw new Error('End time must be after start time.');
+  }
+
+  const { data: session, error: sessionError } = await supabase
+    .from('sessions')
+    .select('id')
+    .eq('id', sessionId)
+    .eq('user_id', user.id)
+    .single();
+  ensureNoError(sessionError);
+
+  if (!session) {
+    throw new Error('Session not found.');
+  }
+
+  const { error } = await supabase
+    .from('sessions')
+    .update({
+      start_time: updates.startTime,
+      end_time: updates.endTime,
+      notes: updates.notes,
+      break_start: null,
+    })
+    .eq('id', sessionId)
+    .eq('user_id', user.id);
+  ensureNoError(error);
+
+  const { data: intervals, error: intervalsError } = await supabase
+    .from('session_intervals')
+    .select('id, start_time, end_time')
+    .eq('session_id', sessionId)
+    .order('start_time', { ascending: true });
+  ensureNoError(intervalsError);
+
+  if (!intervals || intervals.length === 0) return;
+
+  const firstInterval = intervals[0];
+  const lastInterval = intervals[intervals.length - 1];
+
+  const { error: firstError } = await supabase
+    .from('session_intervals')
+    .update({ start_time: updates.startTime })
+    .eq('id', firstInterval.id);
+  ensureNoError(firstError);
+
+  const { error: lastError } = await supabase
+    .from('session_intervals')
+    .update({ end_time: updates.endTime })
+    .eq('id', lastInterval.id);
+  ensureNoError(lastError);
+}
+
 export async function saveSessionOutcome(
   sessionId: number,
   outcome: 'achieved' | 'partial' | 'missed'

@@ -100,27 +100,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setActiveTeamId(activeId);
   }, []);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      if (u) await loadTeamsForUser(u.id);
-      setLoading(false);
-    });
+  const syncAuthState = useCallback(async (nextUser: User | null) => {
+    setUser(nextUser);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      if (u) {
-        await loadTeamsForUser(u.id);
-      } else {
+    if (!nextUser) {
+      setUserTeams([]);
+      setActiveTeamId(null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      await loadTeamsForUser(nextUser.id);
+    } catch (error) {
+      console.error('Failed to load teams for user', error);
+      setUserTeams([]);
+      setActiveTeamId(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadTeamsForUser]);
+
+  useEffect(() => {
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => syncAuthState(session?.user ?? null))
+      .catch((error) => {
+        console.error('Failed to restore auth session', error);
+        setUser(null);
         setUserTeams([]);
         setActiveTeamId(null);
-      }
+        setLoading(false);
+      });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      await syncAuthState(session?.user ?? null);
     });
 
     return () => subscription.unsubscribe();
-  }, [loadTeamsForUser]);
+  }, [syncAuthState]);
 
   async function signIn(email: string, password: string): Promise<string | null> {
     const { error } = await supabase.auth.signInWithPassword({ email, password });

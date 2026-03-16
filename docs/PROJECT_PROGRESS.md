@@ -550,6 +550,7 @@ npm install --legacy-peer-deps
   vercel  → https://github.com/cheloman04/clockea_v1.git    (Vercel watches this)
   ```
 - Deploy command: `git push origin main && git push vercel main`
+- **IMPORTANT:** Always push to BOTH remotes. Vercel only watches `clockea_v1` — if you only push to `origin` (Clockea), the deploy won't trigger.
 - `.npmrc` contains `legacy-peer-deps=true` to fix Vercel `npm install` peer-dep failures
 - `vercel.json`: `buildCommand: "npm install --legacy-peer-deps && npx expo export --platform web"`, `outputDirectory: "dist"`, SPA rewrites
 

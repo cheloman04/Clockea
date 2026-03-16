@@ -16,7 +16,7 @@ function RootLayoutNav() {
     } else if (user && onAuthScreen) {
       router.replace('/');
     }
-  }, [user, loading]);
+  }, [loading, router, segments, user]);
 
   if (loading) {
     return <View style={{ flex: 1, backgroundColor: '#1e3545' }} />;
@@ -29,8 +29,6 @@ function RootLayoutNav() {
         headerShadowVisible: false,
         headerTitleStyle: { fontWeight: '700', color: '#ffffff', fontSize: 17 },
         headerTintColor: '#fe7f2d',
-        headerLeftContainerStyle: { paddingLeft: 4 },
-        headerRightContainerStyle: { paddingRight: 4 },
       }}
     >
       <Stack.Screen name="login"         options={{ headerShown: false }} />

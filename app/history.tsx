@@ -4,7 +4,13 @@ import { Alert, Platform, SectionList, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SessionItem from '../components/SessionItem';
 import Navbar from '../components/Navbar';
-import { deleteSession, getAllSessions, getIntervalsForSessions, getObjectivesForSessions, resumeSession } from '../database/storage';
+import {
+  deleteSession,
+  getAllSessions,
+  getIntervalsForSessions,
+  getObjectivesForSessions,
+  resumeSession,
+} from '../database/storage';
 import { Session, SessionInterval, SessionObjective } from '../database/types';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDate, formatMinutes } from '../utils/time';
@@ -58,18 +64,33 @@ export default function HistoryScreen() {
       router.replace('/working');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Could not resume session.';
-      if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Error', msg); }
+      if (Platform.OS === 'web') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Error', msg);
+      }
     }
+  }
+
+  function openEditSession(session: Session) {
+    router.push({
+      pathname: '/edit-session',
+      params: {
+        id: String(session.id),
+        notes: session.notes ?? '',
+        startTime: session.start_time,
+        endTime: session.end_time ?? '',
+      },
+    });
   }
 
   function handleActions(session: Session) {
     if (Platform.OS === 'web') {
-      // Alert.alert with multiple buttons is not supported on web
       const choice = window.prompt(
-        `${session.project_name ?? 'Session'}\n\n1 – Edit Notes\n2 – Delete Session\n\nType a number:`,
+        `${session.project_name ?? 'Session'}\n\n1 - Edit Session\n2 - Delete Session\n\nType a number:`
       );
       if (choice === '1') {
-        router.push({ pathname: '/edit-session', params: { id: String(session.id), notes: session.notes ?? '' } });
+        openEditSession(session);
       } else if (choice === '2') {
         if (window.confirm(`Delete this ${session.project_name ?? 'session'}? This cannot be undone.`)) {
           deleteSession(session.id).then(load);
@@ -77,14 +98,11 @@ export default function HistoryScreen() {
       }
       return;
     }
+
     Alert.alert(session.project_name ?? 'Session', undefined, [
       {
-        text: 'Edit Notes',
-        onPress: () =>
-          router.push({
-            pathname: '/edit-session',
-            params: { id: String(session.id), notes: session.notes ?? '' },
-          }),
+        text: 'Edit Session',
+        onPress: () => openEditSession(session),
       },
       {
         text: 'Delete Session',
@@ -98,7 +116,10 @@ export default function HistoryScreen() {
               {
                 text: 'Delete',
                 style: 'destructive',
-                onPress: async () => { await deleteSession(session.id); load(); },
+                onPress: async () => {
+                  await deleteSession(session.id);
+                  load();
+                },
               },
             ]
           ),
@@ -133,9 +154,7 @@ export default function HistoryScreen() {
         renderSectionHeader={({ section }) => (
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
-            <Text style={styles.sectionTotal}>
-              {formatMinutes(section.totalMinutes)}
-            </Text>
+            <Text style={styles.sectionTotal}>{formatMinutes(section.totalMinutes)}</Text>
           </View>
         )}
         stickySectionHeadersEnabled
