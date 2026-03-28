@@ -1,6 +1,6 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
 function RootLayoutNav() {
@@ -19,7 +19,22 @@ function RootLayoutNav() {
   }, [loading, router, segments, user]);
 
   if (loading) {
-    return <View style={{ flex: 1, backgroundColor: '#1e3545' }} />;
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: '#1e3545',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 12,
+        }}
+      >
+        <ActivityIndicator size="large" color="#fe7f2d" />
+        <Text style={{ color: '#7aa3b8', fontSize: 14, fontWeight: '600' }}>
+          Restoring your session...
+        </Text>
+      </View>
+    );
   }
 
   return (

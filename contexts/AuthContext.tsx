@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { Team } from '../database/types';
@@ -17,12 +17,31 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
+const AUTH_BOOT_TIMEOUT_MS = 8000;
+const TEAM_LOAD_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [userTeams, setUserTeams] = useState<Team[]>([]);
+  const authRequestIdRef = useRef(0);
 
   const loadTeamsForUser = useCallback(async (userId: string) => {
     // Fetch current user (for pending_team_code in metadata)
@@ -101,6 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const syncAuthState = useCallback(async (nextUser: User | null) => {
+    const requestId = ++authRequestIdRef.current;
     setUser(nextUser);
 
     if (!nextUser) {
@@ -111,18 +131,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      await loadTeamsForUser(nextUser.id);
+      await withTimeout(loadTeamsForUser(nextUser.id), TEAM_LOAD_TIMEOUT_MS, 'Loading team data');
     } catch (error) {
       console.error('Failed to load teams for user', error);
       setUserTeams([]);
       setActiveTeamId(null);
     } finally {
-      setLoading(false);
+      if (authRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, [loadTeamsForUser]);
 
   useEffect(() => {
-    supabase.auth.getSession()
+    withTimeout(supabase.auth.getSession(), AUTH_BOOT_TIMEOUT_MS, 'Restoring auth session')
       .then(({ data: { session } }) => syncAuthState(session?.user ?? null))
       .catch((error) => {
         console.error('Failed to restore auth session', error);
